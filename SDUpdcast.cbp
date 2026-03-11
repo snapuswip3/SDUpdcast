@@ -36,12 +36,45 @@
 		</Build>
 		<Linker>
 			<Add library="stdc++" />
+			<Add library="fatfs" />
 		</Linker>
-		<Unit filename="cd/cd_root/cdfs.txt" />
-		<Unit filename="main.cpp" />
-		<Unit filename="rd/romdisk/romfs.txt" />
-		<Unit filename="rdcd/cd_root/cdfs.txt" />
-		<Unit filename="rdcd/romdisk/romfs.txt" />
+		<UnitsGlob directory="src" wildcard="*.*" recursive="1" id="1343674964" addToProject="1">
+			<Option target="Debug" />
+			<Option target="Release" />
+		</UnitsGlob>
+		<Unit filename="src/config.h">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/App.cpp">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/App.h">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/ArgParser.cpp">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/ArgParser.h">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/Logger.cpp">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/Logger.h">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/UpdateArgs.h">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/Utility.cpp">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/Utility.h">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/main.cpp">
+			<Option glob="1343674964" />
+		</Unit>
 		<Extensions>
 			<compiler project_loader_arguments="">
 				<compiler_settings target="Debug" target_loader_arguments="" />
