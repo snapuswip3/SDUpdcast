@@ -1,6 +1,7 @@
 #include "App.h"
 
 #include "../config.h"
+#include "../SDUpdcast.h"
 #include "ArgParser.h"
 #include "Logger.h"
 
@@ -18,6 +19,8 @@ extern "C" {
 #include <malloc.h>
 #endif
 
+App* App::s_instance = nullptr;
+
 bool App::Init(int argc, char *argv[])
 {
     fs_fat_mount_sd();
@@ -26,25 +29,23 @@ bool App::Init(int argc, char *argv[])
     Logger::Init(LOG_FQFN);
 #endif
 
-    char** fakeArgv = nullptr;
+    char **fakeArgv = nullptr;
     int fakeArgc = 0;
 
     if (!argv || argc == 0)
     {
-        if (ArgParser::BuildFakeArgs(fakeArgc, fakeArgv))
+        if (SDUpdcast_BuildFakeArgs(&fakeArgc, &fakeArgv))
         {
             argc = fakeArgc;
             argv = fakeArgv;
+            m_ownsArgv = true; // mark that we own this memory
         }
     }
 
-    m_args = ArgParser::Parse(argc, argv);
+    m_argc = argc;
+    m_argv = argv;
 
-    if (fakeArgv)
-    {
-        free(fakeArgv[0]); // the buffer containing tokens
-        free(fakeArgv);
-    }
+    m_args = ArgParser::Parse(argc, argv);
 
 #ifndef DEBUG
     cdrom_init();
@@ -61,7 +62,7 @@ bool App::Init(int argc, char *argv[])
         return false;
     }
 
-    if (!m_args.skipUpdate)
+    if (m_args.skipUpdate)
     {
         Logger::LogError("Updater invoked with --skip-update. Exiting.");
         return false;
@@ -78,27 +79,40 @@ void App::Run()
     malloc_stats();
 #endif
 
-    void *blob;
-    ssize_t length = fs_load(m_args.returnPath, &blob);
-    if (length > 0)
-    {
-        Logger::LogInfo("Returning to target: %s", m_args.returnPath);
-        arch_exec(blob, length);
-    }
-    else
-    {
-        Logger::LogError("Could not load binary: %s", m_args.returnPath);
-    }
+    Logger::LogInfo("Returning to target: %s", m_args.returnPath);
+
+    SDUpdcast_RunUpdater(
+        m_argc,
+        m_argv,
+        m_args.returnPath,
+        nullptr,
+        Cleanup
+    );
 }
 
 void App::Shutdown()
 {
-    Logger::LogInfo("App shutting down");
+    Cleanup();
+    sd_shutdown();
+}
+
+void App::Cleanup()
+{
+    if (!s_instance) return;
+
+    Logger::LogInfo("App shutting down (callback)");
+
+    if (s_instance->m_ownsArgv && s_instance->m_argv)
+    {
+        free(s_instance->m_argv[0]);
+        free(s_instance->m_argv);
+        s_instance->m_argv = nullptr;
+        s_instance->m_ownsArgv = false;
+    }
 
     Logger::Shutdown();
 #ifdef DEBUG
     malloc_stats();
 #endif
     fs_fat_unmount_sd();
-    sd_shutdown();
 }

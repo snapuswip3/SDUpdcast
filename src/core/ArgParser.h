@@ -8,7 +8,6 @@ class ArgParser
 public:
     ArgParser() = delete;
 
-    static bool BuildFakeArgs(int& outArgc, char**& outArgv);
     static UpdateArgs Parse(int argc, char* argv[]);
 };
 

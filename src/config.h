@@ -3,7 +3,7 @@
 
 #define PROJECT_NAME "SDUpdcast"
 #define LOG_FQFN "/sd/" PROJECT_NAME "/debug.log"
-#define ARGS_FQFN "/sd/" PROJECT_NAME "/running.cfg"
+#define SCRATCH_FQFN "/sd/" PROJECT_NAME "/running.cfg"
 
 #define DEBUG_SD_LOG
 

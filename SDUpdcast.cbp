@@ -38,10 +38,16 @@
 			<Add library="stdc++" />
 			<Add library="fatfs" />
 		</Linker>
+		<ExtraCommands>
+			<Add after='sh-elf-objcopy -O binary &quot;$TARGET_OUTPUT_FILE&quot; &quot;$(PROJECT_DIR)$(TARGET_OUTPUT_DIR)$(PROJECT_NAME).bin&quot;' />
+		</ExtraCommands>
 		<UnitsGlob directory="src" wildcard="*.*" recursive="1" id="1343674964" addToProject="1">
 			<Option target="Debug" />
 			<Option target="Release" />
 		</UnitsGlob>
+		<Unit filename="src/SDUpdcast.h">
+			<Option glob="1343674964" />
+		</Unit>
 		<Unit filename="src/config.h">
 			<Option glob="1343674964" />
 		</Unit>

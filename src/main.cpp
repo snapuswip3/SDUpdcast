@@ -15,7 +15,8 @@ int main(int argc, char *argv[])
     if (app.Init(argc, argv)) app.Run();
 
     app.Shutdown();
-    arch_abort();
+
+    arch_exit();
 
     return 0;
 }
