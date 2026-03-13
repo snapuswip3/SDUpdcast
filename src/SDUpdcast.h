@@ -21,10 +21,16 @@ typedef void (*SDUpdcast_PreExecFunc)(void);
 /* ---------------- Recursion / SD checks ---------------- */
 static int SDUpdcast_HasSkipUpdate(int argc, char *argv[])
 {
-    if (!argv) return 0;
+    if (!argv || argc <= 0) return 0;
+
     for (int i = 0; i < argc; i++)
-        if (strcmp(argv[i], "--skip-update") == 0)
+    {
+        char *arg = argv[i];
+        if (!arg) continue;
+
+        if (strcmp(arg, "--skip-update") == 0)
             return 1;
+    }
     return 0;
 }
 
@@ -111,10 +117,11 @@ static int SDUpdcast_WriteScratch(const char *returnBin, int argc, char *argv[])
 
     for (int i = 0; i < argc; i++)
     {
-        if (!argv[i] || !*argv[i]) continue;
-        if (strcmp(argv[i], "--return") == 0) { i++; continue; }
-        if (strcmp(argv[i], "--skip-update") == 0) continue;
-        snprintf(buf, sizeof(buf), "%s\n", argv[i]);
+        char *arg = argv[i];
+        if (!arg) continue;
+        if (strcmp(arg, "--return") == 0) { i++; continue; }
+        if (strcmp(arg, "--skip-update") == 0) continue;
+        snprintf(buf, sizeof(buf), "%s\n", arg);
         fs_write(f, buf, strlen(buf));
         outWritten++;
     }
@@ -134,10 +141,11 @@ static void SDUpdcast_RunUpdater(
     if (!destinationBin || !*destinationBin) return;
     if (!SDUpdcast_HasSD()) return;
 
-    // Build fake args if nothing supplied
     char **fakeArgv = NULL;
     int fakeArgc = 0;
     char *fakeBuffer = NULL;
+
+    // Build fake args if needed
     if (!argv || argc == 0)
     {
         if (SDUpdcast_BuildFakeArgs(&fakeArgc, &fakeArgv, &fakeBuffer))
@@ -147,33 +155,34 @@ static void SDUpdcast_RunUpdater(
         }
     }
 
-    // recursion guard
+    // Write scratch (handles --return or --skip-update)
+    SDUpdcast_WriteScratch(returnBin, argc, argv);
+
+    // Check skip-update AFTER writing scratch
     if (SDUpdcast_HasSkipUpdate(argc, argv))
     {
-        // delete scratch file so we don't loop
+        // Delete scratch to prevent looping
         fs_unlink(SDUPDCAST_FQFN);
 
-        // free any fake argv memory if allocated
-        if (fakeArgv)
-        {
-            free(fakeBuffer);
-            free(fakeArgv);
-        }
+        // Free fake argv if allocated
+        if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
 
         return;
     }
 
-    // Write scratch (handles --return or --skip-update)
-    SDUpdcast_WriteScratch(returnBin, argc, argv);
-
-    if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
-
     // Load and execute destination
     void *blob;
     ssize_t length = fs_load(destinationBin, &blob);
-    if (length <= 0 || !blob) return;
+    if (length <= 0 || !blob)
+    {
+        if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
+        return;
+    }
 
     if (preExecFunc) preExecFunc();
+
+    // Free fake argv before jumping
+    if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
 
     arch_exec(blob, length);
 }

@@ -26,7 +26,7 @@ bool App::Init(int argc, char *argv[])
     fs_fat_mount_sd();
 
 #ifdef DEBUG_SD_LOG
-    Logger::Init(LOG_FQFN);
+    //Logger::Init(LOG_FQFN);
 #endif
 
     char **fakeArgv = nullptr;
@@ -103,7 +103,7 @@ void App::Cleanup()
 {
     if (!s_instance) return;
 
-    Logger::LogInfo("App shutting down (callback)");
+    //Logger::LogInfo("App shutting down (callback)");
 
     if (s_instance->m_ownsArgv)
     {
@@ -122,9 +122,9 @@ void App::Cleanup()
         s_instance->m_ownsArgv = false;
     }
 
-    Logger::Shutdown();
+    //Logger::Shutdown();
 #ifdef DEBUG
-    malloc_stats();
+    //malloc_stats();
 #endif
     fs_fat_unmount_sd();
 }
