@@ -16,6 +16,7 @@ private:
     UpdateArgs m_args{};
     int m_argc{};
     char **m_argv{};
+    char *m_argvBuffer{};
     bool m_ownsArgv{};
 
     static App *s_instance;

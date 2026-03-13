@@ -31,14 +31,17 @@ bool App::Init(int argc, char *argv[])
 
     char **fakeArgv = nullptr;
     int fakeArgc = 0;
+    char *fakeBuffer = nullptr;
 
     if (!argv || argc == 0)
     {
-        if (SDUpdcast_BuildFakeArgs(&fakeArgc, &fakeArgv))
+        if (SDUpdcast_BuildFakeArgs(&fakeArgc, &fakeArgv, &fakeBuffer))
         {
             argc = fakeArgc;
             argv = fakeArgv;
-            m_ownsArgv = true; // mark that we own this memory
+
+            m_ownsArgv = true;
+            m_argvBuffer = fakeBuffer;
         }
     }
 
@@ -102,11 +105,20 @@ void App::Cleanup()
 
     Logger::LogInfo("App shutting down (callback)");
 
-    if (s_instance->m_ownsArgv && s_instance->m_argv)
+    if (s_instance->m_ownsArgv)
     {
-        free(s_instance->m_argv[0]);
-        free(s_instance->m_argv);
-        s_instance->m_argv = nullptr;
+        if (s_instance->m_argvBuffer)
+        {
+            free(s_instance->m_argvBuffer);
+            s_instance->m_argvBuffer = nullptr;
+        }
+
+        if (s_instance->m_argv)
+        {
+            free(s_instance->m_argv);
+            s_instance->m_argv = nullptr;
+        }
+
         s_instance->m_ownsArgv = false;
     }
 

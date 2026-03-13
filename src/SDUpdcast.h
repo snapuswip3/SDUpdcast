@@ -48,12 +48,18 @@ static int SDUpdcast_WriteScratch(const char *returnBin, int argc, char *argv[])
     char buf[256];
 
     /* write return executable first */
-    if (returnBin && *returnBin) snprintf(buf, sizeof(buf), "--return %s\n", returnBin);
-    fs_write(f, buf, strlen(buf));
+    if (returnBin && *returnBin)
+    {
+        snprintf(buf, sizeof(buf), "--return %s\n", returnBin);
+        fs_write(f, buf, strlen(buf));
+    }
 
     /* write remaining arguments */
     for (int i = 0; i < argc; i++)
     {
+        if (!argv || !argv[i] || !*argv[i])
+            continue;
+
         snprintf(buf, sizeof(buf), "%s\n", argv[i]);
         fs_write(f, buf, strlen(buf));
     }
@@ -64,7 +70,7 @@ static int SDUpdcast_WriteScratch(const char *returnBin, int argc, char *argv[])
 
 /* ---------------- Build fake argv from running.cfg ---------------- */
 
-static inline int SDUpdcast_BuildFakeArgs(int *outArgc, char ***outArgv)
+static int SDUpdcast_BuildFakeArgs(int *outArgc, char ***outArgv, char **outBuffer)
 {
     file_t f = fs_open(SDUPDCAST_FQFN, O_RDONLY);
     if (f < 0) return 0;
@@ -86,6 +92,9 @@ static inline int SDUpdcast_BuildFakeArgs(int *outArgc, char ***outArgv)
     for (char *p = buffer; *p; p++)
         if (*p == '\n') count++;
 
+    if (size > 0 && buffer[size-1] != '\n')
+        count++;
+
     if (count == 0) { free(buffer); return 0; }
 
     char **argv = (char **)malloc(sizeof(char *) * (count + 1));
@@ -105,6 +114,7 @@ static inline int SDUpdcast_BuildFakeArgs(int *outArgc, char ***outArgv)
 
     *outArgc = count;
     *outArgv = argv;
+    *outBuffer = buffer;
     return 1;
 }
 
@@ -128,9 +138,10 @@ static void SDUpdcast_RunUpdater(
     /* build fake args only if argc/argv empty and returnBin is populated */
     char **fakeArgv = NULL;
     int fakeArgc = 0;
+    char *fakeBuffer = NULL;
     if ((!argv || argc == 0) && returnBin && *returnBin)
     {
-        if (SDUpdcast_BuildFakeArgs(&fakeArgc, &fakeArgv))
+        if (SDUpdcast_BuildFakeArgs(&fakeArgc, &fakeArgv, &fakeBuffer))
         {
             argc = fakeArgc;
             argv = fakeArgv;
@@ -140,29 +151,39 @@ static void SDUpdcast_RunUpdater(
     /* write scratch file only if returnBin is populated */
     if (returnBin && *returnBin)
     {
-        char **newArgv = (char **)malloc(sizeof(char *) * (argc + 1 + 1)); /* +1 for --skip-update */
+        char **newArgv = (char **)malloc(sizeof(char *) * (argc + 2));
         if (!newArgv)
         {
             if (fakeArgv)
             {
-                free(fakeArgv[0]);
+                free(fakeBuffer);
                 free(fakeArgv);
             }
             return;
         }
 
-        newArgv[0] = (char *)"--skip-update";  // cast to char* to silence C++ warning
-        for (int i = 0; i < argc; i++)
-            newArgv[i + 1] = argv[i];
+        int out = 0;
 
-        SDUpdcast_WriteScratch(returnBin, argc + 1, newArgv);
+        if (!SDUpdcast_HasSkipUpdate(argc, argv))
+            newArgv[out++] = (char *)"--skip-update";
+
+        for (int i = 0; i < argc; i++)
+        {
+            if (!argv[i]) continue;
+            if (strncmp(argv[i], "--return", 8) == 0) continue;
+            if (strcmp(argv[i], "--skip-update") == 0) continue;
+
+            newArgv[out++] = argv[i];
+        }
+
+        SDUpdcast_WriteScratch(returnBin, out, newArgv);
         free(newArgv);
     }
 
     /* free fake argv if allocated */
     if (fakeArgv)
     {
-        free(fakeArgv[0]);
+        free(fakeBuffer);
         free(fakeArgv);
     }
 
