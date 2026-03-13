@@ -103,7 +103,7 @@ void App::Cleanup()
 {
     if (!s_instance) return;
 
-    //Logger::LogInfo("App shutting down (callback)");
+    Logger::LogInfo("App shutting down (callback)");
 
     if (s_instance->m_ownsArgv)
     {
@@ -124,7 +124,7 @@ void App::Cleanup()
 
     //Logger::Shutdown();
 #ifdef DEBUG
-    //malloc_stats();
+    malloc_stats();
 #endif
     fs_fat_unmount_sd();
 }
