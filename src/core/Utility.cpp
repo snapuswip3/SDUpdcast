@@ -44,7 +44,8 @@ Utility::MakeDirResult Utility::MakeParentDir(const char *path)
     while (segment)
     {
         *segment = '\0';
-        if (fs_mkdir(fullPath) < 0)
+        struct stat st;
+        if (fs_stat(fullPath, &st, 0) < 0 && fs_mkdir(fullPath) < 0)
         {
             free(fullPath);
             return MakeDirResult::MkdirFailed;
@@ -53,7 +54,8 @@ Utility::MakeDirResult Utility::MakeParentDir(const char *path)
         segment = strchr(segment + 1, '/');
     }
 
-    if (fs_mkdir(fullPath) < 0)
+    struct stat st;
+    if (fs_stat(fullPath, &st, 0) < 0 && fs_mkdir(fullPath) < 0)
     {
         free(fullPath);
         return MakeDirResult::MkdirFailed;

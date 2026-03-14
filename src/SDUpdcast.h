@@ -93,7 +93,8 @@ static int SDUpdcast_BuildFakeArgs(int *outArgc, char ***outArgv, char **outBuff
 /* ---------------- Write scratch file ---------------- */
 static int SDUpdcast_WriteScratch(const char *returnBin, int argc, char *argv[])
 {
-    fs_mkdir(SDUPDCAST_DIR);
+    struct stat st;
+    if (fs_stat(SDUPDCAST_DIR, &st, 0) < 0) fs_mkdir(SDUPDCAST_DIR);
 
     file_t f = fs_open(SDUPDCAST_FQFN, O_WRONLY | O_CREAT | O_TRUNC);
     if (f < 0) return 0;
