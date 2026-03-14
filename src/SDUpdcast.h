@@ -4,6 +4,7 @@
 #include <arch/arch.h>
 #include <arch/exec.h>
 #include <kos/fs.h>
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -172,17 +173,47 @@ static void SDUpdcast_RunUpdater(
     }
 
     // Load and execute destination
-    void *blob;
-    ssize_t length = fs_load(destinationBin, &blob);
-    if (length <= 0 || !blob)
+    file_t fd = fs_open(destinationBin, O_RDONLY);
+    if (fd == FILEHND_INVALID)
     {
         if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
         return;
     }
 
+    ssize_t length = fs_total(fd);
+    if (length <= 0)
+    {
+        fs_close(fd);
+        if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
+        return;
+    }
+
+    void *blob = memalign(32, length);
+    if (!blob)
+    {
+        fs_close(fd);
+        if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
+        return;
+    }
+
+    ssize_t total = 0;
+    while (total < length)
+    {
+        ssize_t r = fs_read(fd, (uint8_t *)blob + total, length - total);
+        if (r <= 0)
+        {
+            fs_close(fd);
+            free(blob);
+            if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
+            return;
+        }
+        total += r;
+    }
+
+    fs_close(fd);
+
     if (preExecFunc) preExecFunc();
 
-    // Free fake argv before jumping
     if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
 
     arch_exec(blob, length);
