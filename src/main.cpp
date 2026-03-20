@@ -12,7 +12,7 @@
 int main(int argc, char *argv[])
 {
     App app;
-    if (app.Init(argc, argv)) app.Run();
+    if (app.Init()) app.Run();
 
     app.Shutdown();
 

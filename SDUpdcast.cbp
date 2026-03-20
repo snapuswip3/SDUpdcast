@@ -57,19 +57,10 @@
 		<Unit filename="src/core/App.h">
 			<Option glob="1343674964" />
 		</Unit>
-		<Unit filename="src/core/ArgParser.cpp">
-			<Option glob="1343674964" />
-		</Unit>
-		<Unit filename="src/core/ArgParser.h">
-			<Option glob="1343674964" />
-		</Unit>
 		<Unit filename="src/core/Logger.cpp">
 			<Option glob="1343674964" />
 		</Unit>
 		<Unit filename="src/core/Logger.h">
-			<Option glob="1343674964" />
-		</Unit>
-		<Unit filename="src/core/UpdateArgs.h">
 			<Option glob="1343674964" />
 		</Unit>
 		<Unit filename="src/core/Utility.cpp">

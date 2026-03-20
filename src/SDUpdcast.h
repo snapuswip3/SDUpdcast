@@ -4,207 +4,160 @@
 #include <arch/arch.h>
 #include <arch/exec.h>
 #include <kos/fs.h>
-#include <malloc.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
-#include <sys/stat.h>
+#include <malloc.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define SDUPDCAST_DIR "/sd/SDUpdcast"
-#define SDUPDCAST_FQFN SDUPDCAST_DIR "/running.cfg"
+/* =========================================================
+   Config: shared memory location (top of RAM)
+   ========================================================= */
+#define SDUPDCAST_SHARED_ADDR ((void*)0x8CFF0000)
 
+/* =========================================================
+   Shared block definition
+   ========================================================= */
+#define SDUPDCAST_MAGIC 0x53445550 /* 'SDUP' */
+
+typedef struct __attribute__((aligned(32))) {
+    volatile uint32_t magic;
+    volatile uint32_t skip;
+    char returnBin[256];
+    char overrideBin[256];
+    char updateUrl[256];
+} SDUpdcast_Block;
+
+/* =========================================================
+   Optional pre-exec hook
+   ========================================================= */
 typedef void (*SDUpdcast_PreExecFunc)(void);
 
-/* ---------------- Recursion / SD checks ---------------- */
-static int SDUpdcast_HasSkipUpdate(int argc, char *argv[])
+/* =========================================================
+   Internal: get shared block
+   ========================================================= */
+static volatile SDUpdcast_Block *SDUpdcast_Get(void)
 {
-    if (!argv || argc <= 0) return 0;
-
-    for (int i = 0; i < argc; i++)
-    {
-        char *arg = argv[i];
-        if (!arg) continue;
-
-        if (strcmp(arg, "--skip-update") == 0)
-            return 1;
-    }
-    return 0;
+    return (volatile SDUpdcast_Block*)SDUPDCAST_SHARED_ADDR;
 }
 
-static int SDUpdcast_HasSD(void)
+/* =========================================================
+   Internal: clear shared state
+   ========================================================= */
+static void SDUpdcast_Clear(void)
 {
-    struct stat st;
-    if (fs_stat("/sd", &st, 0) < 0) return 0;
-    return S_ISDIR(st.st_mode);
+    volatile SDUpdcast_Block *b = SDUpdcast_Get();
+
+    b->magic = 0;
+    b->skip  = 0;
+
+    b->returnBin[0]   = 0;
+    b->overrideBin[0] = 0;
+    b->updateUrl[0]   = 0;
 }
 
-/* ---------------- Build fake argv from running.cfg ---------------- */
-static int SDUpdcast_BuildFakeArgs(int *outArgc, char ***outArgv, char **outBuffer)
+/* =========================================================
+   Internal: write shared state
+   ========================================================= */
+static void SDUpdcast_Write(
+    const char *returnBin,
+    const char *overrideBin,
+    const char *updateUrl)
 {
-    file_t f = fs_open(SDUPDCAST_FQFN, O_RDONLY);
-    if (f < 0) return 0;
+    volatile SDUpdcast_Block *b = SDUpdcast_Get();
 
-    int size = fs_total(f);
-    if (size <= 0) { fs_close(f); return 0; }
+    b->magic = SDUPDCAST_MAGIC;
+    b->skip  = 0;
 
-    char *buffer = (char *)malloc(size + 1);
-    if (!buffer) { fs_close(f); return 0; }
+    #define COPY(dst, src)                     \
+        if ((src) && *(src)) {                \
+            strncpy((char*)(dst), (src), sizeof(dst) - 1); \
+            (dst)[sizeof(dst) - 1] = 0;       \
+        } else {                              \
+            (dst)[0] = 0;                     \
+        }
 
-    int read = fs_read(f, buffer, size);
-    fs_close(f);
-    if (read != size) { free(buffer); return 0; }
+    COPY(b->returnBin, returnBin);
+    COPY(b->overrideBin, overrideBin);
+    COPY(b->updateUrl, updateUrl);
 
-    buffer[size] = 0;
+    #undef COPY
+}
 
-    char **argv = (char **)malloc(sizeof(char *) * (size / 2 + 2));
-    if (!argv) { free(buffer); return 0; }
+/* =========================================================
+   Internal: read shared state
+   ========================================================= */
+static int SDUpdcast_Read(
+    int *skip,
+    const volatile char **returnBin,
+    const volatile char **overrideBin,
+    const volatile char **updateUrl)
+{
+    volatile SDUpdcast_Block *b = SDUpdcast_Get();
 
-    int argc = 0;
-    char *p = buffer;
-
-    while (*p)
-    {
-        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-        if (!*p) break;
-        argv[argc++] = p;
-        while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
-        if (*p) { *p = 0; p++; }
-    }
-
-    argv[argc] = NULL;
-
-    if (argc == 0)
-    {
-        free(argv);
-        free(buffer);
+    if (b->magic != SDUPDCAST_MAGIC)
         return 0;
-    }
 
-    *outArgc = argc;
-    *outArgv = argv;
-    *outBuffer = buffer;
+    if (skip)        *skip        = b->skip;
+    if (returnBin)   *returnBin   = b->returnBin;
+    if (overrideBin) *overrideBin = b->overrideBin;
+    if (updateUrl)   *updateUrl   = b->updateUrl;
 
     return 1;
 }
 
-/* ---------------- Write scratch file ---------------- */
-static int SDUpdcast_WriteScratch(const char *returnBin, int argc, char *argv[])
+/* =========================================================
+   Internal: set skip flag
+   ========================================================= */
+static void SDUpdcast_SetSkip(void)
 {
-    struct stat st;
-    if (fs_stat(SDUPDCAST_DIR, &st, 0) < 0) fs_mkdir(SDUPDCAST_DIR);
+    volatile SDUpdcast_Block *b = SDUpdcast_Get();
 
-    file_t f = fs_open(SDUPDCAST_FQFN, O_WRONLY | O_CREAT | O_TRUNC);
-    if (f < 0) return 0;
-
-    char buf[256];
-    int outWritten = 0;
-
-    if (returnBin && *returnBin)
-    {
-        snprintf(buf, sizeof(buf), "--return %s\n", returnBin);
-        fs_write(f, buf, strlen(buf));
-        outWritten++;
-    }
-
-    if (!returnBin || !*returnBin)
-    {
-        snprintf(buf, sizeof(buf), "--skip-update\n");
-        fs_write(f, buf, strlen(buf));
-        outWritten++;
-    }
-
-    for (int i = 0; i < argc; i++)
-    {
-        char *arg = argv[i];
-        if (!arg) continue;
-        if (strcmp(arg, "--return") == 0) { i++; continue; }
-        if (strcmp(arg, "--skip-update") == 0) continue;
-        snprintf(buf, sizeof(buf), "%s\n", arg);
-        fs_write(f, buf, strlen(buf));
-        outWritten++;
-    }
-
-    fs_close(f);
-    return outWritten > 0;
+    b->magic = SDUPDCAST_MAGIC;
+    b->skip  = 1;
 }
 
-/* ---------------- Run updater / destination binary ---------------- */
-static void SDUpdcast_RunUpdater(
-    int argc,
-    char *argv[],
-    const char *destinationBin,
-    const char *returnBin,
+/* =========================================================
+   Internal: load + exec binary
+   ========================================================= */
+static void SDUpdcast_Exec(
+    const char *bin,
     SDUpdcast_PreExecFunc preExecFunc)
 {
-    if (!destinationBin || !*destinationBin) return;
-    if (!SDUpdcast_HasSD()) return;
-
-    char **fakeArgv = NULL;
-    int fakeArgc = 0;
-    char *fakeBuffer = NULL;
-
-    // Build fake args if needed
-    if (!argv || argc == 0)
-    {
-        if (SDUpdcast_BuildFakeArgs(&fakeArgc, &fakeArgv, &fakeBuffer))
-        {
-            argc = fakeArgc;
-            argv = fakeArgv;
-        }
-    }
-
-    // Write scratch (handles --return or --skip-update)
-    SDUpdcast_WriteScratch(returnBin, argc, argv);
-
-    // Check skip-update AFTER writing scratch
-    if (SDUpdcast_HasSkipUpdate(argc, argv))
-    {
-        // Delete scratch to prevent looping
-        fs_unlink(SDUPDCAST_FQFN);
-
-        // Free fake argv if allocated
-        if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
-
+    if (!bin || !*bin)
         return;
-    }
 
-    // Load and execute destination
-    file_t fd = fs_open(destinationBin, O_RDONLY);
+    file_t fd = fs_open(bin, O_RDONLY);
     if (fd == FILEHND_INVALID)
-    {
-        if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
         return;
-    }
 
     ssize_t length = fs_total(fd);
     if (length <= 0)
     {
         fs_close(fd);
-        if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
         return;
     }
 
-    void *blob = memalign(32, length);
+    void *blob = memalign(32, (size_t)length);
     if (!blob)
     {
         fs_close(fd);
-        if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
         return;
     }
 
     ssize_t total = 0;
     while (total < length)
     {
-        ssize_t r = fs_read(fd, (uint8_t *)blob + total, length - total);
+        ssize_t r = fs_read(fd,
+                            (uint8_t *)blob + total,
+                            (size_t)(length - total));
         if (r <= 0)
         {
             fs_close(fd);
             free(blob);
-            if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
             return;
         }
         total += r;
@@ -212,11 +165,99 @@ static void SDUpdcast_RunUpdater(
 
     fs_close(fd);
 
-    if (preExecFunc) preExecFunc();
+    if (preExecFunc)
+        preExecFunc();
 
-    if (fakeArgv) { free(fakeBuffer); free(fakeArgv); }
+    arch_exec(blob, (size_t)length);
+}
 
-    arch_exec(blob, length);
+/* =========================================================
+   PUBLIC: Run updater (main entry point)
+   ========================================================= */
+static void SDUpdcast_RunUpdater(
+    const char *destinationBin,
+    const char *returnBin,
+    const char *overrideBin,
+    const char *updateUrl,
+    SDUpdcast_PreExecFunc preExecFunc)
+{
+    if (!destinationBin || !*destinationBin)
+        return;
+
+    /* Optional: keep your SD requirement */
+    /* if (!SDUpdcast_HasSD()) return; */
+
+    /* ===============================
+       1. Read volatile state
+       =============================== */
+       printf("before read\n");
+    int skip = 0;
+
+    if (SDUpdcast_Read(&skip, NULL, NULL, NULL))
+    {
+        if (skip)
+        {
+            /* ===============================
+               2. Clean + exit (no loop)
+               =============================== */
+            SDUpdcast_Clear();
+            return;
+        }
+    }
+
+    /* ===============================
+       3. Write new state for updater
+       =============================== */
+              printf("before write\n");
+    SDUpdcast_Write(returnBin, overrideBin, updateUrl);
+
+    /* ===============================
+       4. Execute updater
+       =============================== */
+              printf("before exec\n");
+    SDUpdcast_Exec(destinationBin, preExecFunc);
+}
+
+/* =========================================================
+   PUBLIC: Call early in updater/main to read inputs
+   ========================================================= */
+static int SDUpdcast_GetParams(
+    char *returnBin,
+    char *overrideBin,
+    char *updateUrl)
+{
+    volatile SDUpdcast_Block *b = SDUpdcast_Get();
+
+    if (b->magic != SDUPDCAST_MAGIC)
+        return 0;
+
+    if (returnBin)
+    {
+        strncpy(returnBin, (const char*)b->returnBin, 255);
+        returnBin[255] = 0;
+    }
+
+    if (overrideBin)
+    {
+        strncpy(overrideBin, (const char*)b->overrideBin, 255);
+        overrideBin[255] = 0;
+    }
+
+    if (updateUrl)
+    {
+        strncpy(updateUrl, (const char*)b->updateUrl, 255);
+        updateUrl[255] = 0;
+    }
+
+    return 1;
+}
+
+/* =========================================================
+   PUBLIC: Call before returning to main app
+   ========================================================= */
+static void SDUpdcast_PrepareReturn(void)
+{
+    SDUpdcast_SetSkip();
 }
 
 #ifdef __cplusplus

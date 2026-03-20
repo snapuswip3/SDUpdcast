@@ -2,7 +2,6 @@
 
 #include "../config.h"
 #include "../SDUpdcast.h"
-#include "ArgParser.h"
 #include "Logger.h"
 
 extern "C" {
@@ -19,9 +18,7 @@ extern "C" {
 #include <malloc.h>
 #endif
 
-App* App::s_instance = nullptr;
-
-bool App::Init(int argc, char *argv[])
+bool App::Init()
 {
     fs_fat_mount_sd();
 
@@ -29,47 +26,20 @@ bool App::Init(int argc, char *argv[])
     Logger::Init(LOG_FQFN);
 #endif
 
-    char **fakeArgv = nullptr;
-    int fakeArgc = 0;
-    char *fakeBuffer = nullptr;
-
-    if (!argv || argc == 0)
+    if (!SDUpdcast_GetParams(m_returnBin, m_overrideBin, m_updateUrl))
     {
-        if (SDUpdcast_BuildFakeArgs(&fakeArgc, &fakeArgv, &fakeBuffer))
-        {
-            argc = fakeArgc;
-            argv = fakeArgv;
-
-            m_ownsArgv = true;
-            m_argvBuffer = fakeBuffer;
-        }
+        Logger::LogError("Couldn't retrieve parameters. Exiting.");
+        return false;
     }
-
-    m_argc = argc;
-    m_argv = argv;
-
-    m_args = ArgParser::Parse(argc, argv);
 
 #ifndef DEBUG
     cdrom_init();
     fs_iso9660_init();
 #endif
 
-    if (m_args.returnPath)
-    {
-        Logger::LogInfo("Return target: %s", m_args.returnPath);
-    }
-    else
-    {
-        Logger::LogError("No return path provided. Exiting.");
-        return false;
-    }
-
-    if (m_args.skipUpdate)
-    {
-        Logger::LogError("Updater invoked with --skip-update. Exiting.");
-        return false;
-    }
+    Logger::LogInfo("Return bin: %s", m_returnBin);
+    Logger::LogInfo("Override bin: %s", m_overrideBin);
+    Logger::LogInfo("Update URL: %s", m_updateUrl);
 
     Logger::LogInfo("App initialized");
 
@@ -82,12 +52,12 @@ void App::Run()
     malloc_stats();
 #endif
 
-    Logger::LogInfo("Returning to target: %s", m_args.returnPath);
+    Logger::LogInfo("Returning to target: %s", m_returnBin);
 
     SDUpdcast_RunUpdater(
-        m_argc,
-        m_argv,
-        m_args.returnPath,
+        m_returnBin,
+        nullptr,
+        nullptr,
         nullptr,
         Cleanup
     );
@@ -101,26 +71,9 @@ void App::Shutdown()
 
 void App::Cleanup()
 {
-    if (!s_instance) return;
+    SDUpdcast_PrepareReturn();
 
     Logger::LogInfo("App shutting down (callback)");
-
-    if (s_instance->m_ownsArgv)
-    {
-        if (s_instance->m_argvBuffer)
-        {
-            free(s_instance->m_argvBuffer);
-            s_instance->m_argvBuffer = nullptr;
-        }
-
-        if (s_instance->m_argv)
-        {
-            free(s_instance->m_argv);
-            s_instance->m_argv = nullptr;
-        }
-
-        s_instance->m_ownsArgv = false;
-    }
 
     Logger::Shutdown();
 #ifdef DEBUG
