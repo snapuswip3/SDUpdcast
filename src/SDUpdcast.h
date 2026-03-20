@@ -4,7 +4,6 @@
 #include <arch/arch.h>
 #include <arch/exec.h>
 #include <kos/fs.h>
-#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <malloc.h>
@@ -45,6 +44,23 @@ static volatile SDUpdcast_Block *SDUpdcast_Get(void)
 }
 
 /* =========================================================
+   Internal: SH4 cache writeback for shared block
+   ========================================================= */
+static void SDUpdcast_Flush(void)
+{
+    volatile SDUpdcast_Block *b = SDUpdcast_Get();
+
+    /* flush each 32-byte cache line */
+    for (size_t i = 0; i < sizeof(SDUpdcast_Block); i += 32)
+    {
+        __asm__ volatile("ocbp @%0" : : "r"((uint8_t*)b + i));
+    }
+
+    /* compiler barrier */
+    __asm__ volatile("" ::: "memory");
+}
+
+/* =========================================================
    Internal: clear shared state
    ========================================================= */
 static void SDUpdcast_Clear(void)
@@ -57,6 +73,8 @@ static void SDUpdcast_Clear(void)
     b->returnBin[0]   = 0;
     b->overrideBin[0] = 0;
     b->updateUrl[0]   = 0;
+
+    SDUpdcast_Flush();
 }
 
 /* =========================================================
@@ -85,6 +103,8 @@ static void SDUpdcast_Write(
     COPY(b->updateUrl, updateUrl);
 
     #undef COPY
+
+    SDUpdcast_Flush();
 }
 
 /* =========================================================
@@ -118,6 +138,8 @@ static void SDUpdcast_SetSkip(void)
 
     b->magic = SDUPDCAST_MAGIC;
     b->skip  = 1;
+
+    SDUpdcast_Flush();
 }
 
 /* =========================================================
@@ -168,6 +190,9 @@ static void SDUpdcast_Exec(
     if (preExecFunc)
         preExecFunc();
 
+    /* ===== ensure all memory writes are visible ===== */
+    __asm__ volatile("" ::: "memory");
+
     arch_exec(blob, (size_t)length);
 }
 
@@ -184,37 +209,19 @@ static void SDUpdcast_RunUpdater(
     if (!destinationBin || !*destinationBin)
         return;
 
-    /* Optional: keep your SD requirement */
-    /* if (!SDUpdcast_HasSD()) return; */
-
-    /* ===============================
-       1. Read volatile state
-       =============================== */
-       printf("before read\n");
     int skip = 0;
 
     if (SDUpdcast_Read(&skip, NULL, NULL, NULL))
     {
         if (skip)
         {
-            /* ===============================
-               2. Clean + exit (no loop)
-               =============================== */
             SDUpdcast_Clear();
             return;
         }
     }
 
-    /* ===============================
-       3. Write new state for updater
-       =============================== */
-              printf("before write\n");
     SDUpdcast_Write(returnBin, overrideBin, updateUrl);
 
-    /* ===============================
-       4. Execute updater
-       =============================== */
-              printf("before exec\n");
     SDUpdcast_Exec(destinationBin, preExecFunc);
 }
 
