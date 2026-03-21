@@ -1,6 +1,8 @@
 #ifndef APP_H
 #define APP_H
 
+#define MAX_MESSAGE_LEN 512
+
 #include <kos.h>
 
 class App
@@ -21,14 +23,17 @@ private:
     // --- Rendering state ---
     pvr_ptr_t m_fontTex{};
     pvr_ptr_t m_backTex{};
-    char* m_textData{};
-    int m_scrollY{0};
-    bool m_done{false};
+
+    char m_currentMessage[MAX_MESSAGE_LEN]{};
+    bool m_done{};
 
     // --- Init helpers ---
     void InitFont();
     void InitBackground();
-    void InitText();
+
+    const char* GetBaseUrl(const char* url);
+    void SetMessage(const char* msg);
+    void SetMessagef(const char* fmt, ...);
 
     // --- Rendering ---
     void DrawFrame();

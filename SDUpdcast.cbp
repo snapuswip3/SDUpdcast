@@ -19,7 +19,7 @@
 					<Add option="-DDEBUG" />
 				</Compiler>
 				<Linker>
-                                        <Add option="obj\Debug\wfont.o" />
+					<Add option="obj\Debug\wfont.o" />
 					<Add option="obj\Debug\romdisk.o" />
 				</Linker>
 			</Target>
@@ -37,7 +37,7 @@
 					<Add option="-DDBGLOG_DISABLED" />
 				</Compiler>
 				<Linker>
-                                        <Add option="obj\Release\wfont.o" />
+					<Add option="obj\Release\wfont.o" />
 					<Add option="obj\Release\romdisk.o" />
 				</Linker>
 			</Target>
@@ -45,14 +45,14 @@
 		<Linker>
 			<Add library="stdc++" />
 			<Add library="fatfs" />
-                        <Add library="png" />
-                        <Add library="z" />
+			<Add library="png" />
+			<Add library="z" />
 		</Linker>
 		<ExtraCommands>
-                        <Add before='cmd /c "$(PROJECT_DIR)build_wfont.bat $(TARGET_OBJECT_DIR)"' />
-                        <Add before='cmd /c "$(PROJECT_DIR)build_romdisk.bat $(TARGET_OBJECT_DIR)"' />
+			<Add before='cmd /c &quot;$(PROJECT_DIR)build_wfont.bat $(TARGET_OBJECT_DIR)&quot;' />
+			<Add before='cmd /c &quot;$(PROJECT_DIR)build_romdisk.bat $(TARGET_OBJECT_DIR)&quot;' />
 			<Add after='sh-elf-objcopy -O binary &quot;$TARGET_OUTPUT_FILE&quot; &quot;$(PROJECT_DIR)$(TARGET_OUTPUT_DIR)$(PROJECT_NAME).bin&quot;' />
-                        <Mode after="always" />
+			<Mode after="always" />
 		</ExtraCommands>
 		<UnitsGlob directory="src" wildcard="*.*" recursive="1" id="1343674964" addToProject="1">
 			<Option target="Debug" />

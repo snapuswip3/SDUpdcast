@@ -6,18 +6,16 @@
 
 extern "C" {
 #include <fatfs.h>
-#include <dc/sd.h>
-#include <png/png.h>
-#include <zlib/zlib.h>
 }
-
+#include <png/png.h>
+#include <dc/sd.h>
 #include <kos/fs.h>
+
 #include <cstdint>
 #include <cstdlib>
 
 // external font + helper from example
 extern "C" char wfont[];
-extern "C" int zlib_getlength(char*);
 
 App* App::s_instance = nullptr;
 
@@ -63,7 +61,8 @@ void App::Run()
 
     InitFont();
     InitBackground();
-    InitText();
+
+    SetMessagef("Connecting to:\n%s", GetBaseUrl(m_updateUrl));
 
     while (!m_done)
     {
@@ -110,9 +109,6 @@ void App::Cleanup()
 
     if (s_instance)
     {
-       if (s_instance->m_textData)
-          free(s_instance->m_textData);
-
        if (s_instance->m_fontTex)
           pvr_mem_free(s_instance->m_fontTex);
 
@@ -120,11 +116,11 @@ void App::Cleanup()
           pvr_mem_free(s_instance->m_backTex);
     }
 
-    SDUpdcast_SetSkip();
-
     Logger::LogInfo("App shutting down (callback)");
 
     Logger::Shutdown();
+
+    SDUpdcast_SetSkip();
 
     fs_fat_unmount_sd();
 }
@@ -169,18 +165,52 @@ void App::InitFont()
     pvr_txr_load_ex(temp_tex, m_fontTex, 256, 256, PVR_TXRLOAD_16BPP);
 }
 
-void App::InitText()
+const char* App::GetBaseUrl(const char* url)
 {
-    int length = zlib_getlength((char*)"/rd/text.gz");
+    if (!url) return "";
 
-    m_textData = (char*)malloc(length + 1);
+    const char* start = strstr(url, "://");
+    if (start)
+        start += 3;
+    else
+        start = url;
 
-    gzFile f = gzopen("/rd/text.gz", "r");
-    gzread(f, m_textData, length);
-    m_textData[length] = 0;
-    gzclose(f);
+    const char* slash = strchr(start, '/');
+    if (!slash)
+        return url;
 
-    Logger::LogInfo("Text length: %d", length);
+    static char buffer[256];
+
+    size_t len = slash - url;
+    if (len >= sizeof(buffer))
+        len = sizeof(buffer) - 1;
+
+    memcpy(buffer, url, len);
+    buffer[len] = '\0';
+
+    return buffer;
+}
+
+void App::SetMessage(const char* msg)
+{
+    if (!msg)
+    {
+        m_currentMessage[0] = '\0';
+        return;
+    }
+
+    strncpy(m_currentMessage, msg, MAX_MESSAGE_LEN - 1);
+    m_currentMessage[MAX_MESSAGE_LEN - 1] = '\0';
+}
+
+void App::SetMessagef(const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+
+    vsnprintf(m_currentMessage, MAX_MESSAGE_LEN, fmt, args);
+
+    va_end(args);
 }
 
 // --------------------------------------------------
@@ -271,12 +301,14 @@ void App::DrawString(float x, float y, float z,
     pvr_poly_compile(&hdr, &cxt);
     pvr_prim(&hdr, sizeof(hdr));
 
+    float lineHeight = 16 * ys + 4; // 4px padding
+
     while (*str)
     {
         if (*str == '\n')
         {
             x = orig_x;
-            y += 40;
+            y += lineHeight;
             str++;
             continue;
         }
@@ -288,6 +320,8 @@ void App::DrawString(float x, float y, float z,
 
 void App::DrawFrame()
 {
+    Logger::KeepStdioAlive();
+
     pvr_wait_ready();
     pvr_scene_begin();
 
@@ -297,15 +331,13 @@ void App::DrawFrame()
 
     pvr_list_begin(PVR_LIST_TR_POLY);
 
-    DrawString(0,
-               m_scrollY % 1720 + 440,
+    DrawString(40,   // <-- top-left X
+               120,   // <-- top-left Y
                3,
                1,1,1,1,
-               m_textData,
+               m_currentMessage,
                2,2);
 
     pvr_list_finish();
     pvr_scene_finish();
-
-    m_scrollY--;
 }
