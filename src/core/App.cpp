@@ -6,17 +6,24 @@
 
 extern "C" {
 #include <fatfs.h>
-}
 #include <dc/sd.h>
+#include <png/png.h>
+#include <zlib/zlib.h>
+}
+
 #include <kos/fs.h>
-#include <kos.h>
-
 #include <cstdint>
+#include <cstdlib>
 
-#ifdef DEBUG
-#include <inttypes.h>
-#include <malloc.h>
-#endif
+// external font + helper from example
+extern "C" char wfont[];
+extern "C" int zlib_getlength(char*);
+
+App* App::s_instance = nullptr;
+
+// --------------------------------------------------
+// INIT
+// --------------------------------------------------
 
 bool App::Init()
 {
@@ -46,13 +53,33 @@ bool App::Init()
     return true;
 }
 
+// --------------------------------------------------
+// RUN LOOP
+// --------------------------------------------------
+
 void App::Run()
 {
-#ifdef DEBUG
-    malloc_stats();
-#endif
+    pvr_init_defaults();
 
-    Logger::LogInfo("Returning to target: %s", m_returnBin);
+    InitFont();
+    InitBackground();
+    InitText();
+
+    while (!m_done)
+    {
+        MAPLE_FOREACH_BEGIN(MAPLE_FUNC_CONTROLLER, cont_state_t, st)
+
+        if (st->buttons & CONT_START)
+        {
+            m_done = true;
+        }
+
+        MAPLE_FOREACH_END()
+
+        DrawFrame();
+    }
+
+    Logger::LogInfo("Launching updater...");
 
     SDUpdcast_RunUpdater(
         m_returnBin,
@@ -63,21 +90,222 @@ void App::Run()
     );
 }
 
+// --------------------------------------------------
+// SHUTDOWN
+// --------------------------------------------------
+
 void App::Shutdown()
 {
     Cleanup();
     sd_shutdown();
 }
 
+// --------------------------------------------------
+// CLEANUP CALLBACK
+// --------------------------------------------------
+
 void App::Cleanup()
 {
-    SDUpdcast_PrepareReturn();
+    pvr_wait_ready();
+
+    if (s_instance)
+    {
+       if (s_instance->m_textData)
+          free(s_instance->m_textData);
+
+       if (s_instance->m_fontTex)
+          pvr_mem_free(s_instance->m_fontTex);
+
+       if (s_instance->m_backTex)
+          pvr_mem_free(s_instance->m_backTex);
+    }
+
+    SDUpdcast_SetSkip();
 
     Logger::LogInfo("App shutting down (callback)");
 
     Logger::Shutdown();
-#ifdef DEBUG
-    malloc_stats();
-#endif
+
     fs_fat_unmount_sd();
+}
+
+// --------------------------------------------------
+// INIT HELPERS
+// --------------------------------------------------
+
+void App::InitBackground()
+{
+    m_backTex = pvr_mem_malloc(512 * 512 * 2);
+    png_to_texture("/rd/background.png", m_backTex, PNG_NO_ALPHA);
+}
+
+void App::InitFont()
+{
+    int i, x, y, c;
+    static unsigned short temp_tex[256 * 256];
+
+    m_fontTex = pvr_mem_malloc(256 * 256 * 2);
+
+    c = 0;
+
+    for (y = 0; y < 128; y += 16)
+        for (x = 0; x < 256; x += 8)
+        {
+            for (i = 0; i < 16; i++)
+            {
+                temp_tex[x + (y + i) * 256 + 0] = 0xffff * ((wfont[c + i] & 0x80) >> 7);
+                temp_tex[x + (y + i) * 256 + 1] = 0xffff * ((wfont[c + i] & 0x40) >> 6);
+                temp_tex[x + (y + i) * 256 + 2] = 0xffff * ((wfont[c + i] & 0x20) >> 5);
+                temp_tex[x + (y + i) * 256 + 3] = 0xffff * ((wfont[c + i] & 0x10) >> 4);
+                temp_tex[x + (y + i) * 256 + 4] = 0xffff * ((wfont[c + i] & 0x08) >> 3);
+                temp_tex[x + (y + i) * 256 + 5] = 0xffff * ((wfont[c + i] & 0x04) >> 2);
+                temp_tex[x + (y + i) * 256 + 6] = 0xffff * ((wfont[c + i] & 0x02) >> 1);
+                temp_tex[x + (y + i) * 256 + 7] = 0xffff * (wfont[c + i] & 0x01);
+            }
+
+            c += 16;
+        }
+
+    pvr_txr_load_ex(temp_tex, m_fontTex, 256, 256, PVR_TXRLOAD_16BPP);
+}
+
+void App::InitText()
+{
+    int length = zlib_getlength((char*)"/rd/text.gz");
+
+    m_textData = (char*)malloc(length + 1);
+
+    gzFile f = gzopen("/rd/text.gz", "r");
+    gzread(f, m_textData, length);
+    m_textData[length] = 0;
+    gzclose(f);
+
+    Logger::LogInfo("Text length: %d", length);
+}
+
+// --------------------------------------------------
+// RENDERING
+// --------------------------------------------------
+
+void App::DrawBackground()
+{
+    pvr_poly_cxt_t cxt;
+    pvr_poly_hdr_t hdr;
+    pvr_vertex_t vert;
+
+    pvr_poly_cxt_txr(&cxt, PVR_LIST_OP_POLY,
+                     PVR_TXRFMT_RGB565,
+                     512, 512,
+                     m_backTex,
+                     PVR_FILTER_BILINEAR);
+
+    pvr_poly_compile(&hdr, &cxt);
+    pvr_prim(&hdr, sizeof(hdr));
+
+    vert.argb = PVR_PACK_COLOR(1,1,1,1);
+    vert.oargb = 0;
+    vert.flags = PVR_CMD_VERTEX;
+
+    vert.x = 0;   vert.y = 0;   vert.z = 1; vert.u = 0; vert.v = 0;
+    pvr_prim(&vert, sizeof(vert));
+
+    vert.x = 640; vert.y = 0;   vert.u = 1; vert.v = 0;
+    pvr_prim(&vert, sizeof(vert));
+
+    vert.x = 0;   vert.y = 480; vert.u = 0; vert.v = 1;
+    pvr_prim(&vert, sizeof(vert));
+
+    vert.x = 640; vert.y = 480; vert.u = 1; vert.v = 1;
+    vert.flags = PVR_CMD_VERTEX_EOL;
+    pvr_prim(&vert, sizeof(vert));
+}
+
+void App::DrawChar(float x1, float y1, float z1,
+                   float a, float r, float g, float b,
+                   int c, float xs, float ys)
+{
+    pvr_vertex_t vert;
+
+    int ix = (c % 32) * 8;
+    int iy = (c / 32) * 16;
+
+    float u1 = (ix + 0.5f) / 256.0f;
+    float v1 = (iy + 0.5f) / 256.0f;
+    float u2 = (ix + 7.5f) / 256.0f;
+    float v2 = (iy + 15.5f) / 256.0f;
+
+    vert.flags = PVR_CMD_VERTEX;
+    vert.argb = PVR_PACK_COLOR(a, r, g, b);
+    vert.oargb = 0;
+    vert.z = z1;
+
+    vert.x = x1; vert.y = y1 + 16 * ys; vert.u = u1; vert.v = v2;
+    pvr_prim(&vert, sizeof(vert));
+
+    vert.x = x1; vert.y = y1; vert.u = u1; vert.v = v1;
+    pvr_prim(&vert, sizeof(vert));
+
+    vert.x = x1 + 8 * xs; vert.y = y1 + 16 * ys; vert.u = u2; vert.v = v2;
+    pvr_prim(&vert, sizeof(vert));
+
+    vert.flags = PVR_CMD_VERTEX_EOL;
+    vert.x = x1 + 8 * xs; vert.y = y1; vert.u = u2; vert.v = v1;
+    pvr_prim(&vert, sizeof(vert));
+}
+
+void App::DrawString(float x, float y, float z,
+                     float a, float r, float g, float b,
+                     char* str, float xs, float ys)
+{
+    pvr_poly_cxt_t cxt;
+    pvr_poly_hdr_t hdr;
+
+    float orig_x = x;
+
+    pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
+                     PVR_TXRFMT_ARGB4444,
+                     256, 256,
+                     m_fontTex,
+                     PVR_FILTER_BILINEAR);
+
+    pvr_poly_compile(&hdr, &cxt);
+    pvr_prim(&hdr, sizeof(hdr));
+
+    while (*str)
+    {
+        if (*str == '\n')
+        {
+            x = orig_x;
+            y += 40;
+            str++;
+            continue;
+        }
+
+        DrawChar(x, y, z, a, r, g, b, *str++, xs, ys);
+        x += 8 * xs;
+    }
+}
+
+void App::DrawFrame()
+{
+    pvr_wait_ready();
+    pvr_scene_begin();
+
+    pvr_list_begin(PVR_LIST_OP_POLY);
+    DrawBackground();
+    pvr_list_finish();
+
+    pvr_list_begin(PVR_LIST_TR_POLY);
+
+    DrawString(0,
+               m_scrollY % 1720 + 440,
+               3,
+               1,1,1,1,
+               m_textData,
+               2,2);
+
+    pvr_list_finish();
+    pvr_scene_finish();
+
+    m_scrollY--;
 }

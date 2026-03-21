@@ -3,6 +3,7 @@
 
 #include <arch/arch.h>
 #include <arch/exec.h>
+#include <dc/sd.h>
 #include <kos/fs.h>
 #include <stdint.h>
 #include <string.h>
@@ -196,6 +197,32 @@ static void SDUpdcast_Exec(
     arch_exec(blob, (size_t)length);
 }
 
+static int SDUpdcast_HasSD(void)
+{
+    uint32_t total_sectors = sd_get_size();
+
+    if (total_sectors > 0) {
+        // SD card is present and has space
+        return 1;
+    }
+
+    // No SD card detected
+    return 0;
+}
+
+static int SDUpdcast_FileExists(const char *path)
+{
+    if (!path || !*path)
+        return 0;
+
+    struct stat st;
+    if (fs_stat(path, &st, 0) < 0)
+        return 0;
+
+    /* ensure it's a regular file */
+    return S_ISREG(st.st_mode);
+}
+
 /* =========================================================
    PUBLIC: Run updater (main entry point)
    ========================================================= */
@@ -206,7 +233,7 @@ static void SDUpdcast_RunUpdater(
     const char *updateUrl,
     SDUpdcast_PreExecFunc preExecFunc)
 {
-    if (!destinationBin || !*destinationBin)
+    if (!destinationBin || !*destinationBin || !SDUpdcast_HasSD())
         return;
 
     int skip = 0;
@@ -218,6 +245,16 @@ static void SDUpdcast_RunUpdater(
             SDUpdcast_Clear();
             return;
         }
+    }
+
+    /* fast-path: override bin (only if no update URL) */
+    if ((!updateUrl || !*updateUrl) &&
+        (overrideBin && *overrideBin) &&
+        SDUpdcast_FileExists(overrideBin))
+    {
+        SDUpdcast_SetSkip();
+        SDUpdcast_Exec(overrideBin, preExecFunc);
+        return;
     }
 
     SDUpdcast_Write(returnBin, overrideBin, updateUrl);
@@ -257,14 +294,6 @@ static int SDUpdcast_GetParams(
     }
 
     return 1;
-}
-
-/* =========================================================
-   PUBLIC: Call before returning to main app
-   ========================================================= */
-static void SDUpdcast_PrepareReturn(void)
-{
-    SDUpdcast_SetSkip();
 }
 
 #ifdef __cplusplus
