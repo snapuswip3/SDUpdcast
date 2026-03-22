@@ -99,17 +99,15 @@ bool Network::Init()
 // ----------------------------------------
 void Network::Shutdown()
 {
-    return; //test no shut
-
     if (!s_initialized)
         return;
 
     Logger::LogInfo("Shutting down network...");
 
-    /*if (dcload_type == DCLOAD_TYPE_IP)
+    if (dcload_type == DCLOAD_TYPE_IP)
     {
         dbgio_dev_select("fs_dclsocket");
-    }*/
+    }
 
     net_shutdown();
 
@@ -196,7 +194,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- KOS tuning: bigger recv buffer & TCP_NODELAY ---
-    int bufsize = 2 * 1024; // ~64 KB
+    int bufsize = 4 * 1024; // 4 KB
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
     int flag = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -240,10 +238,10 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- Receive + buffered SD writes ---
-    const int recvBufferSize = 1 * 1024;  // 16 KB network buffer
-    const int sdBufferSize   = 252 * 1024;  // not divisible cleanly by 64 KB
-    static char recvBuffer[recvBufferSize];
-    static char sdBuffer[sdBufferSize];
+    const int recvBufferSize = 4 * 1024;  // 4 KB network buffer
+    const int sdBufferSize   = 32 * 1024;  //256 KB
+    char recvBuffer[recvBufferSize];
+    char sdBuffer[sdBufferSize];
     int sdBufUsed = 0;
 
     int len;
@@ -264,26 +262,30 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
                     break;
                 }
             }
-
-            thd_sleep(1);
         }
 
         if (headerDone) {
             int dataLen = len - dataOffset;
             if (sdBufUsed + dataLen > sdBufferSize) {
                 // flush full buffer
-                fs_write(f, sdBuffer, sdBufUsed);
+int written = 0;
+while (written < sdBufUsed) {
+    int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
+    if (ret <= 0) {
+        Logger::LogError("Write failed");
+        return false;
+    }
+    written += ret;
+}
                 sdBufUsed = 0;
-                thd_sleep(9);
-            }
-            else {
-                 thd_sleep(1);
             }
 
             memcpy(sdBuffer + sdBufUsed, recvBuffer + dataOffset, dataLen);
             sdBufUsed += dataLen;
             totalBytes += dataLen;
         }
+
+        thd_sleep(1);
 
         // --- Progress callback every 100ms ---
         uint64_t now = timer_ms_gettime64();
@@ -295,9 +297,17 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- Flush any remaining SD buffer ---
-    if (sdBufUsed > 0) {
-        fs_write(f, sdBuffer, sdBufUsed);
+if (sdBufUsed > 0) {
+    int written = 0;
+    while (written < sdBufUsed) {
+        int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
+        if (ret <= 0) {
+            Logger::LogError("Write failed");
+            return false;
+        }
+        written += ret;
     }
+}
 
     fs_close(f);
     close(sock);
