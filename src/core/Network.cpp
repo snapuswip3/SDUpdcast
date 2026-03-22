@@ -194,7 +194,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- KOS tuning: bigger recv buffer & TCP_NODELAY ---
-    int bufsize = 64 * 1024; // 64 KB
+    int bufsize = 128 * 1024; // 64 KB
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
     int flag = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -238,10 +238,10 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- Receive + buffered SD writes ---
-    const int recvBufferSize = 16 * 1024;  // 16 KB network buffer
-    const int sdBufferSize   = 32 * 1024;  // 32 KB SD write buffer
-    char recvBuffer[recvBufferSize];
-    char sdBuffer[sdBufferSize];
+    const int recvBufferSize = 32 * 1024;  // 16 KB network buffer
+    const int sdBufferSize   = 128 * 1024;  // 128 KB SD write buffer
+    static char recvBuffer[recvBufferSize];
+    static char sdBuffer[sdBufferSize];
     int sdBufUsed = 0;
 
     int len;
