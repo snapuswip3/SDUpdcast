@@ -5,6 +5,6 @@
 #define LOG_FQFN "/sd/" PROJECT_NAME "/debug.log"
 #define SCRATCH_FQFN "/sd/" PROJECT_NAME "/running.cfg"
 
-#define DEBUG_SD_LOG
+//#define DEBUG_SD_LOG
 
 #endif // CONFIG_H

@@ -3,6 +3,7 @@
 #include "../config.h"
 #include "../SDUpdcast.h"
 #include "Logger.h"
+#include "Network.h"
 
 extern "C" {
 #include <fatfs.h>
@@ -31,11 +32,23 @@ bool App::Init()
     Logger::Init(LOG_FQFN);
 #endif
 
-    if (!SDUpdcast_GetParams(m_returnBin, m_overrideBin, m_updateUrl))
+    if (!Network::Init())
+        return false;
+
+    strncpy(m_returnBin, "/sd/return.bin", sizeof(m_returnBin));
+    m_returnBin[sizeof(m_returnBin) - 1] = '\0';
+
+    strncpy(m_overrideBin, "/sd/demotek.bin", sizeof(m_overrideBin));
+    m_overrideBin[sizeof(m_overrideBin) - 1] = '\0';
+
+    strncpy(m_updateUrl, "http://ac3t1ne.co.uk/dc/demotek.bin", sizeof(m_updateUrl));
+    m_updateUrl[sizeof(m_updateUrl) - 1] = '\0';
+
+    /*if (!SDUpdcast_GetParams(m_returnBin, m_overrideBin, m_updateUrl))
     {
         Logger::LogError("Couldn't retrieve parameters. Exiting.");
         return false;
-    }
+    }*/
 
 #ifndef DEBUG
     cdrom_init();
@@ -64,7 +77,18 @@ void App::Run()
 
     SetMessagef("Connecting to:\n%s", GetBaseUrl(m_updateUrl));
 
-    while (!m_done)
+    DrawFrame();
+
+Network::Download(
+    m_updateUrl,
+    m_overrideBin,
+    [](const char* msg) {
+        App::s_instance->SetMessage(msg);
+        App::s_instance->DrawFrame();
+    }
+);
+
+    /*while (!m_done)
     {
         MAPLE_FOREACH_BEGIN(MAPLE_FUNC_CONTROLLER, cont_state_t, st)
 
@@ -76,13 +100,13 @@ void App::Run()
         MAPLE_FOREACH_END()
 
         DrawFrame();
-    }
+    }*/
 
     Logger::LogInfo("Launching updater...");
 
     SDUpdcast_RunUpdater(
         m_returnBin,
-        nullptr,
+        m_overrideBin,
         nullptr,
         nullptr,
         Cleanup
@@ -115,6 +139,8 @@ void App::Cleanup()
        if (s_instance->m_backTex)
           pvr_mem_free(s_instance->m_backTex);
     }
+
+    Network::Shutdown();
 
     Logger::LogInfo("App shutting down (callback)");
 
@@ -212,6 +238,7 @@ void App::SetMessagef(const char* fmt, ...)
 
     va_end(args);
 }
+
 
 // --------------------------------------------------
 // RENDERING
