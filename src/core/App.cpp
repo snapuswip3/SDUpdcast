@@ -35,7 +35,7 @@ bool App::Init()
     if (!Network::Init())
         return false;
 
-    strncpy(m_returnBin, "/sd/return.bin", sizeof(m_returnBin));
+    strncpy(m_returnBin, "/sd/demotek.bin", sizeof(m_returnBin));
     m_returnBin[sizeof(m_returnBin) - 1] = '\0';
 
     strncpy(m_overrideBin, "/sd/demotek.bin", sizeof(m_overrideBin));

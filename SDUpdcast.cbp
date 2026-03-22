@@ -47,6 +47,7 @@
 			<Add library="fatfs" />
 			<Add library="png" />
 			<Add library="z" />
+			<Add library="fastmem" />
 		</Linker>
 		<ExtraCommands>
 			<Add before='cmd /c &quot;$(PROJECT_DIR)build_wfont.bat $(TARGET_OBJECT_DIR)&quot;' />
@@ -74,6 +75,12 @@
 			<Option glob="1343674964" />
 		</Unit>
 		<Unit filename="src/core/Logger.h">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/Network.cpp">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/Network.h">
 			<Option glob="1343674964" />
 		</Unit>
 		<Unit filename="src/core/Utility.cpp">

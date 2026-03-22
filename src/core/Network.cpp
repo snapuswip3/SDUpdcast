@@ -196,7 +196,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- KOS tuning: bigger recv buffer & TCP_NODELAY ---
-    int bufsize = 256 * 1024; // 256 KB
+    int bufsize = 2 * 1024; // ~64 KB
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
     int flag = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -240,8 +240,8 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- Receive + buffered SD writes ---
-    const int recvBufferSize = 64 * 1024;  // 64 KB network buffer
-    const int sdBufferSize   = 256 * 1024;  // 256 KB SD write buffer
+    const int recvBufferSize = 1 * 1024;  // 16 KB network buffer
+    const int sdBufferSize   = 252 * 1024;  // not divisible cleanly by 64 KB
     static char recvBuffer[recvBufferSize];
     static char sdBuffer[sdBufferSize];
     int sdBufUsed = 0;
@@ -264,6 +264,8 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
                     break;
                 }
             }
+
+            thd_sleep(1);
         }
 
         if (headerDone) {
@@ -272,14 +274,16 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
                 // flush full buffer
                 fs_write(f, sdBuffer, sdBufUsed);
                 sdBufUsed = 0;
+                thd_sleep(9);
+            }
+            else {
+                 thd_sleep(1);
             }
 
             memcpy(sdBuffer + sdBufUsed, recvBuffer + dataOffset, dataLen);
             sdBufUsed += dataLen;
             totalBytes += dataLen;
         }
-
-        thd_sleep(10);
 
         // --- Progress callback every 100ms ---
         uint64_t now = timer_ms_gettime64();
