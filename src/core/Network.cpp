@@ -99,6 +99,8 @@ bool Network::Init()
 // ----------------------------------------
 void Network::Shutdown()
 {
+    return; //test no shut
+
     if (!s_initialized)
         return;
 
@@ -194,7 +196,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- KOS tuning: bigger recv buffer & TCP_NODELAY ---
-    int bufsize = 128 * 1024; // 64 KB
+    int bufsize = 256 * 1024; // 256 KB
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
     int flag = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -238,8 +240,8 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // --- Receive + buffered SD writes ---
-    const int recvBufferSize = 32 * 1024;  // 16 KB network buffer
-    const int sdBufferSize   = 128 * 1024;  // 128 KB SD write buffer
+    const int recvBufferSize = 64 * 1024;  // 64 KB network buffer
+    const int sdBufferSize   = 256 * 1024;  // 256 KB SD write buffer
     static char recvBuffer[recvBufferSize];
     static char sdBuffer[sdBufferSize];
     int sdBufUsed = 0;
@@ -277,14 +279,14 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
             totalBytes += dataLen;
         }
 
+        thd_sleep(10);
+
         // --- Progress callback every 100ms ---
         uint64_t now = timer_ms_gettime64();
         if (cb && now - lastUpdate > 100) {
             snprintf(msg, sizeof(msg), "Downloading... %d KB", totalBytes / 1024);
             cb(msg);
             lastUpdate = now;
-
-            thd_sleep(5); // keep UI responsive
         }
     }
 
