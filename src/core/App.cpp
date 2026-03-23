@@ -11,18 +11,14 @@ extern "C" {
 #include <png/png.h>
 #include <dc/sd.h>
 #include <kos/fs.h>
+#include <kos/thread.h>
 
 #include <cstdint>
 #include <cstdlib>
 
-// external font + helper from example
 extern "C" char wfont[];
 
 App* App::s_instance = nullptr;
-
-// --------------------------------------------------
-// INIT
-// --------------------------------------------------
 
 bool App::Init()
 {
@@ -64,10 +60,6 @@ bool App::Init()
     return true;
 }
 
-// --------------------------------------------------
-// RUN LOOP
-// --------------------------------------------------
-
 void App::Run()
 {
     pvr_init_defaults();
@@ -75,57 +67,37 @@ void App::Run()
     InitFont();
     InitBackground();
 
-    SetMessagef("Connecting to:\n%s", GetBaseUrl(m_updateUrl));
-
     DrawFrame();
 
-Network::Download(
-    m_updateUrl,
-    m_overrideBin,
-    [](const char* msg) {
-        App::s_instance->SetMessage(msg);
-        App::s_instance->DrawFrame();
-    }
-);
-
-    /*while (!m_done)
-    {
-        MAPLE_FOREACH_BEGIN(MAPLE_FUNC_CONTROLLER, cont_state_t, st)
-
-        if (st->buttons & CONT_START)
-        {
-            m_done = true;
-        }
-
-        MAPLE_FOREACH_END()
-
-        DrawFrame();
-    }*/
-
-    Logger::LogInfo("Launching updater...");
-
-    SDUpdcast_RunUpdater(
-        m_returnBin,
+    bool updateSuccess = Network::Download(
+        m_updateUrl,
         m_overrideBin,
-        nullptr,
-        nullptr,
-        Cleanup
+        [](const char* msg) {
+            App::s_instance->SetMessage(msg);
+            App::s_instance->DrawFrame();
+        }
     );
-}
 
-// --------------------------------------------------
-// SHUTDOWN
-// --------------------------------------------------
+    if (updateSuccess) SetMessage("Update successful\nlaunching...");
+    else SetMessage("Something went wrong\naborting...");
+
+    DrawFrame();
+    Network::Shutdown();
+    thd_sleep(500);
+
+    char* destinationBin = updateSuccess ? m_overrideBin : m_returnBin;
+
+    Logger::LogInfo("Launching %s", destinationBin);
+
+    SDUpdcast_SetSkip();
+    SDUpdcast_Exec(destinationBin, Cleanup);
+}
 
 void App::Shutdown()
 {
     Cleanup();
     sd_shutdown();
 }
-
-// --------------------------------------------------
-// CLEANUP CALLBACK
-// --------------------------------------------------
 
 void App::Cleanup()
 {
@@ -140,20 +112,10 @@ void App::Cleanup()
           pvr_mem_free(s_instance->m_backTex);
     }
 
-    Network::Shutdown();
-
-    Logger::LogInfo("App shutting down (callback)");
-
     Logger::Shutdown();
-
-    SDUpdcast_SetSkip();
 
     fs_fat_unmount_sd();
 }
-
-// --------------------------------------------------
-// INIT HELPERS
-// --------------------------------------------------
 
 void App::InitBackground()
 {
@@ -191,32 +153,6 @@ void App::InitFont()
     pvr_txr_load_ex(temp_tex, m_fontTex, 256, 256, PVR_TXRLOAD_16BPP);
 }
 
-const char* App::GetBaseUrl(const char* url)
-{
-    if (!url) return "";
-
-    const char* start = strstr(url, "://");
-    if (start)
-        start += 3;
-    else
-        start = url;
-
-    const char* slash = strchr(start, '/');
-    if (!slash)
-        return url;
-
-    static char buffer[256];
-
-    size_t len = slash - url;
-    if (len >= sizeof(buffer))
-        len = sizeof(buffer) - 1;
-
-    memcpy(buffer, url, len);
-    buffer[len] = '\0';
-
-    return buffer;
-}
-
 void App::SetMessage(const char* msg)
 {
     if (!msg)
@@ -228,21 +164,6 @@ void App::SetMessage(const char* msg)
     strncpy(m_currentMessage, msg, MAX_MESSAGE_LEN - 1);
     m_currentMessage[MAX_MESSAGE_LEN - 1] = '\0';
 }
-
-void App::SetMessagef(const char* fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-
-    vsnprintf(m_currentMessage, MAX_MESSAGE_LEN, fmt, args);
-
-    va_end(args);
-}
-
-
-// --------------------------------------------------
-// RENDERING
-// --------------------------------------------------
 
 void App::DrawBackground()
 {
@@ -341,7 +262,7 @@ void App::DrawString(float x, float y, float z,
         }
 
         DrawChar(x, y, z, a, r, g, b, *str++, xs, ys);
-        x += 9 * xs;
+        x += (8 + 1) * xs; // 1px character spacing
     }
 }
 
@@ -358,8 +279,8 @@ void App::DrawFrame()
 
     pvr_list_begin(PVR_LIST_TR_POLY);
 
-    DrawString(40,   // <-- top-left X
-               160,   // <-- top-left Y
+    DrawString(40,  // <-- top-left X
+               160, // <-- top-left Y
                3,
                1,1,1,1,
                m_currentMessage,

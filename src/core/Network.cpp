@@ -2,37 +2,23 @@
 #include "Logger.h"
 
 #include <kos.h>
+#include <kos/dbgio.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
-#include <cstring>
+
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 
 extern "C" uint32 _fs_dclsocket_get_ip(void);
 
-// ----------------------------------------
-// Static member definition
-// ----------------------------------------
-bool Network::s_initialized = false;
-
-// ----------------------------------------
-// Init
-// ----------------------------------------
 bool Network::Init()
 {
-    if (s_initialized)
-    {
-        Logger::LogInfo("Network already initialized");
-        return true;
-    }
-
     Logger::LogInfo("Initializing network...");
 
     uint32 ip = 0;
 
-    // -----------------------------
-    // Handle dcload-ip
-    // -----------------------------
     if (dcload_type == DCLOAD_TYPE_IP)
     {
         Logger::LogInfo("Detected dcload-ip");
@@ -48,25 +34,15 @@ bool Network::Init()
         dbgio_dev_select("scif");
     }
 
-    // -----------------------------
-    // Init adapters
-    // -----------------------------
     la_init();
     bba_init();
-    //w5500_adapter_init(NULL, true);
 
-    // -----------------------------
-    // Init network stack
-    // -----------------------------
     if (net_init(ip) < 0)
     {
         Logger::LogError("net_init failed");
         return false;
     }
 
-    // -----------------------------
-    // Restore dcload console
-    // -----------------------------
     if (dcload_type == DCLOAD_TYPE_IP)
     {
         if (!fs_dclsocket_init())
@@ -78,9 +54,6 @@ bool Network::Init()
         }
     }
 
-    // -----------------------------
-    // Log IP
-    // -----------------------------
     if (net_default_dev)
     {
         Logger::LogInfo("IP: %d.%d.%d.%d",
@@ -90,60 +63,30 @@ bool Network::Init()
             net_default_dev->ip_addr[3]);
     }
 
-    s_initialized = true;
     return true;
 }
 
-// ----------------------------------------
-// Shutdown
-// ----------------------------------------
 void Network::Shutdown()
 {
-    if (!s_initialized)
-        return;
-
     Logger::LogInfo("Shutting down network...");
 
     if (dcload_type == DCLOAD_TYPE_IP)
     {
-        dbgio_dev_select("fs_dclsocket");
-    }
+		dbgio_dev_select("null"); //TODO find out why DCSWAT has DS
+	}
 
     net_shutdown();
-
-    // small safety delay (helps stability before arch_exec)
-    thd_sleep(50);
-
-    s_initialized = false;
 
     Logger::LogInfo("Network shutdown complete");
 }
 
-// ----------------------------------------
-// State
-// ----------------------------------------
-bool Network::IsInitialized()
-{
-    return s_initialized;
-}
-
 bool Network::Download(const char* url, const char* destPath, ProgressCallback cb)
 {
-    if (!s_initialized) {
-        if (cb) cb("Network not initialized");
-        Logger::LogError("Network not initialized");
-        return false;
-    }
+    Notify(cb, "Download:\n%s", destPath);
 
-    char msg[256];
-    snprintf(msg, sizeof(msg), "Download: %s -> %s", url, destPath);
-    if(cb) cb(msg);
-    Logger::LogInfo("%s", msg);
-
-    // --- Parse URL ---
+    // Validate host
     const char* hostStart = strstr(url, "http://");
     if (!hostStart) {
-        if(cb) cb("Only http:// supported");
         Logger::LogError("Only http:// supported");
         return false;
     }
@@ -151,7 +94,6 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
 
     const char* pathStart = strchr(hostStart, '/');
     if (!pathStart) {
-        if(cb) cb("Invalid URL (no path)");
         Logger::LogError("Invalid URL (no path)");
         return false;
     }
@@ -161,40 +103,37 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     host[pathStart - hostStart] = '\0';
     const char* path = pathStart;
 
-    if(cb) cb(host);
-    if(cb) cb(path);
     Logger::LogInfo("Host: %s, Path: %s", host, path);
 
-    // --- Resolve host ---
+    // Resolve IP
     uint32_t ip = inet_addr(host);
     if (ip == INADDR_NONE) {
-        snprintf(msg, sizeof(msg), "Resolving hostname: %s", host);
-        if(cb) cb(msg);
+        Notify(cb, "Resolving hostname:\n%s", host);
 
         struct hostent* he = gethostbyname(host);
         if (!he) {
-            if(cb) cb("DNS lookup failed");
             Logger::LogError("DNS lookup failed");
             return false;
         }
 
         ip = *(uint32_t*)he->h_addr;
-        snprintf(msg, sizeof(msg), "Resolved IP: %lu.%lu.%lu.%lu",
-                 (ip >> 24) & 0xFF, (ip >> 16) & 0xFF,
-                 (ip >> 8) & 0xFF, ip & 0xFF);
-        if(cb) cb(msg);
+
+        Logger::LogInfo(
+            "Resolved IP: %lu.%lu.%lu.%lu",
+            (ip >> 24) & 0xFF,
+            (ip >> 16) & 0xFF,
+            (ip >> 8) & 0xFF,
+            ip & 0xFF);
     }
 
-    // --- Open socket ---
+    // Set up socket
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
-        if(cb) cb("Socket creation failed");
-        Logger::LogError("socket failed");
+        Logger::LogError("Socket creation failed");
         return false;
     }
 
-    // --- KOS tuning: bigger recv buffer & TCP_NODELAY ---
-    int bufsize = 4 * 1024; // 4 KB
+    int bufsize = 65535;
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
     int flag = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -205,15 +144,14 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     addr.sin_addr.s_addr = ip;
 
     if (connect(sock, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        if(cb) cb("Connect failed");
-        Logger::LogError("connect failed");
+        Logger::LogError("Connect failed");
         close(sock);
         return false;
     }
 
-    if(cb) cb("Connected to server");
+    Notify(cb, "Connected to server:\n%s", host);
 
-    // --- Send HTTP GET request ---
+    // Send HTTP Get request
     char request[256];
     snprintf(request, sizeof(request),
              "GET %s HTTP/1.0\r\n"
@@ -222,37 +160,33 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
              path, host);
     send(sock, request, strlen(request), 0);
 
-    // --- Open SD file ---
+    // Open SD File
     file_t f = fs_open(destPath, O_WRONLY | O_CREAT | O_TRUNC);
     if (f < 0) {
-        snprintf(msg, sizeof(msg), "File open failed: %s", destPath);
-        if(cb) cb(msg);
-        Logger::LogError("%s", msg);
+        Logger::LogError("File open failed: %s", destPath);
         close(sock);
         return false;
     }
 
-    if(cb) {
-        snprintf(msg, sizeof(msg), "Writing to: %s", destPath);
-        cb(msg);
-    }
+    Logger::LogInfo("Writing to: %s", destPath);
 
-    // --- Receive + buffered SD writes ---
-    const int recvBufferSize = 4 * 1024;  // 4 KB network buffer
-    const int sdBufferSize   = 32 * 1024;  //256 KB
-    char recvBuffer[recvBufferSize];
-    char sdBuffer[sdBufferSize];
+    const int recvBufferSize = 32 * 1024;
+    const int sdBufferSize   = 128 * 1024;
+
+    static char recvBuffer[recvBufferSize] __attribute__((aligned(32)));
+    static char sdBuffer[sdBufferSize] __attribute__((aligned(32)));
+
     int sdBufUsed = 0;
 
-    int len;
+    int len = 0;
     bool headerDone = false;
     int totalBytes = 0;
     uint64_t lastUpdate = timer_ms_gettime64();
 
+    // Recv loop
     while ((len = recv(sock, recvBuffer, sizeof(recvBuffer), 0)) > 0) {
         int dataOffset = 0;
 
-        // --- Skip HTTP header ---
         if (!headerDone) {
             for (int i = 0; i < len - 3; i++) {
                 if (recvBuffer[i] == '\r' && recvBuffer[i+1] == '\n' &&
@@ -266,17 +200,17 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
 
         if (headerDone) {
             int dataLen = len - dataOffset;
+
             if (sdBufUsed + dataLen > sdBufferSize) {
-                // flush full buffer
-int written = 0;
-while (written < sdBufUsed) {
-    int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
-    if (ret <= 0) {
-        Logger::LogError("Write failed");
-        return false;
-    }
-    written += ret;
-}
+                int written = 0;
+                while (written < sdBufUsed) {
+                    int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
+                    if (ret <= 0) {
+                        Logger::LogError("Write failed");
+                        return false;
+                    }
+                    written += ret;
+                }
                 sdBufUsed = 0;
             }
 
@@ -287,34 +221,59 @@ while (written < sdBufUsed) {
 
         thd_sleep(1);
 
-        // --- Progress callback every 100ms ---
         uint64_t now = timer_ms_gettime64();
         if (cb && now - lastUpdate > 100) {
-            snprintf(msg, sizeof(msg), "Downloading... %d KB", totalBytes / 1024);
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Downloading...\n%d KB", totalBytes / 1024);
             cb(msg);
             lastUpdate = now;
         }
     }
 
-    // --- Flush any remaining SD buffer ---
-if (sdBufUsed > 0) {
-    int written = 0;
-    while (written < sdBufUsed) {
-        int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
-        if (ret <= 0) {
-            Logger::LogError("Write failed");
-            return false;
+    if (sdBufUsed > 0) {
+        int written = 0;
+        while (written < sdBufUsed) {
+            int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
+            if (ret <= 0) {
+                Logger::LogError("Write failed");
+                return false;
+            }
+            written += ret;
         }
-        written += ret;
     }
-}
 
     fs_close(f);
     close(sock);
 
-    snprintf(msg, sizeof(msg), "Download complete\n(%d KB)", totalBytes / 1024);
-    if(cb) cb(msg);
-    Logger::LogInfo("%s", msg);
+    Notify(cb, "Download complete\n%d KB", totalBytes / 1024);
 
     return true;
+}
+
+void Network::Notify(ProgressCallback cb, const char* fmt, ...)
+{
+    char uiBuf[512];
+    char logBuf[512];
+
+    va_list args;
+
+    va_start(args, fmt);
+    vsnprintf(uiBuf, sizeof(uiBuf), fmt, args);
+    va_end(args);
+
+    strncpy(logBuf, uiBuf, sizeof(logBuf));
+    logBuf[sizeof(logBuf) - 1] = '\0';
+
+    for (char* p = logBuf; *p; ++p) {
+        if (*p == '\n') {
+            *p = ' ';
+        }
+    }
+
+    if (cb)
+    {
+        cb(uiBuf);
+        thd_sleep(1000);
+    }
+    Logger::LogInfo("%s", logBuf);
 }

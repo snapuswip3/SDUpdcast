@@ -15,27 +15,21 @@ public:
     void Shutdown();
 
 private:
-    // --- Existing updater params ---
     char m_returnBin[256]{};
     char m_overrideBin[256]{};
     char m_updateUrl[256]{};
 
-    // --- Rendering state ---
     pvr_ptr_t m_fontTex{};
     pvr_ptr_t m_backTex{};
 
     char m_currentMessage[MAX_MESSAGE_LEN]{};
     bool m_done{};
 
-    // --- Init helpers ---
     void InitFont();
     void InitBackground();
 
-    const char* GetBaseUrl(const char* url);
     void SetMessage(const char* msg);
-    void SetMessagef(const char* fmt, ...);
 
-    // --- Rendering ---
     void DrawFrame();
     void DrawBackground();
     void DrawChar(float x1, float y1, float z1,
