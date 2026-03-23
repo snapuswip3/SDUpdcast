@@ -312,7 +312,7 @@ if (sdBufUsed > 0) {
     fs_close(f);
     close(sock);
 
-    snprintf(msg, sizeof(msg), "Download complete (%d KB)", totalBytes / 1024);
+    snprintf(msg, sizeof(msg), "Download complete\n(%d KB)", totalBytes / 1024);
     if(cb) cb(msg);
     Logger::LogInfo("%s", msg);
 

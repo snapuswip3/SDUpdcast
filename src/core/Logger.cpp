@@ -115,7 +115,16 @@ void Logger::Log(const char* level, const char* fmt, va_list args)
 
     if (g_logFile >= 0)
     {
-        fs_write(g_logFile, fullBuf, strlen(fullBuf));
+        size_t len = strlen(fullBuf);
+        size_t written = 0;
+
+        while (written < len) {
+            ssize_t ret = fs_write(g_logFile, fullBuf + written, len - written);
+            if (ret <= 0) {
+                break;
+            }
+            written += ret;
+        }
     }
 }
 

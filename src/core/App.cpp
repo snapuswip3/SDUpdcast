@@ -341,7 +341,7 @@ void App::DrawString(float x, float y, float z,
         }
 
         DrawChar(x, y, z, a, r, g, b, *str++, xs, ys);
-        x += 8 * xs;
+        x += 9 * xs;
     }
 }
 
@@ -359,7 +359,7 @@ void App::DrawFrame()
     pvr_list_begin(PVR_LIST_TR_POLY);
 
     DrawString(40,   // <-- top-left X
-               120,   // <-- top-left Y
+               160,   // <-- top-left Y
                3,
                1,1,1,1,
                m_currentMessage,
