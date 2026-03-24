@@ -5,7 +5,9 @@
 #include <kos/dbgio.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
+#include <ppp/ppp.h>
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -13,8 +15,13 @@
 
 extern "C" uint32 _fs_dclsocket_get_ip(void);
 
+bool Network::s_initialized = false;
+
 bool Network::Init()
 {
+    if (s_initialized)
+        return true;
+
     Logger::LogInfo("Initializing network...");
 
     uint32 ip = 0;
@@ -34,8 +41,11 @@ bool Network::Init()
         dbgio_dev_select("scif");
     }
 
-    la_init();
-    bba_init();
+    if (!la_init() && !bba_init())
+    {
+        Logger::LogInfo("No ethernet");
+        return false;
+    }
 
     if (net_init(ip) < 0)
     {
@@ -63,21 +73,91 @@ bool Network::Init()
             net_default_dev->ip_addr[3]);
     }
 
+    s_initialized = true;
     return true;
 }
 
 void Network::Shutdown()
 {
-    Logger::LogInfo("Shutting down network...");
-
-    if (dcload_type == DCLOAD_TYPE_IP)
+    if (s_initialized)
     {
-		dbgio_dev_select("null"); //TODO find out why DCSWAT has DS
+        Logger::LogInfo("Shutting down network...");
+
+        if (dcload_type == DCLOAD_TYPE_IP)
+        {
+		    dbgio_dev_select("null"); //TODO find out why DCSWAT has DS
+	    }
+
+        net_shutdown();
+
+        Logger::LogInfo("Network shutdown complete");
+    }
+    else
+    {
+        Logger::LogInfo("Shutting down network...");
+
+        ppp_shutdown();
+
+		if(modem_is_connected() || modem_is_connecting()) {
+			modem_shutdown();
+			net_shutdown();
+		}
+
+		Logger::LogInfo("Network shutdown complete");
+    }
+}
+
+bool Network::Dial(ProgressCallback cb)
+{
+    if(!modem_init())
+    {
+        Logger::LogError("modem_init failed");
+        return false;
+    }
+
+    ppp_init();
+    int err = 0;
+
+    Notify(cb, "Dialing connection...");
+    int conn_rate = 0;
+    err = ppp_modem_init("1111111", 0, &conn_rate); //ppp_modem_init("11111", 0, NULL);//ppp_modem_init("555", 0, NULL);
+    if(err != 0)
+    {
+        Logger::LogError("Couldn't dial a connection (%d)", err);
+        return false;
+    }
+
+    Notify(cb, "Connected at:\n%dbps", conn_rate);
+
+
+    Notify(cb, "Establishing PPP link...");
+    ppp_set_login("dream", "dreamcast");//ppp_set_login("dream", "cast");
+
+    err = ppp_connect();
+    if(err != 0)
+    {
+        Logger::LogError("Couldn't establish PPP link (%d)", err);
+        return false;
+    }
+
+    err = net_init(0);
+    if (err < 0)
+    {
+        Logger::LogError("net_init fail", err);
+        return false;
+    }
+
+    if(net_default_dev != NULL) {
+		char ip_str[64];
+		memset(ip_str, 0, sizeof(ip_str));
+		snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d",
+			net_default_dev->ip_addr[0], net_default_dev->ip_addr[1],
+			net_default_dev->ip_addr[2], net_default_dev->ip_addr[3]);
+		setenv("NET_IPV4", ip_str, 1);
+		Logger::LogInfo("Network initialized, IPv4 address: %s\n", ip_str);
 	}
 
-    net_shutdown();
-
-    Logger::LogInfo("Network shutdown complete");
+    return true;
 }
 
 bool Network::Download(const char* url, const char* destPath, ProgressCallback cb)
@@ -110,12 +190,16 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     if (ip == INADDR_NONE) {
         Notify(cb, "Resolving hostname:\n%s", host);
 
-        struct hostent* he = gethostbyname(host);
-        if (!he) {
-            Logger::LogError("DNS lookup failed");
-            return false;
-        }
 
+
+const int maxAttempts = 5;
+
+for (int attempt = 1; attempt <= maxAttempts; ++attempt)
+{
+    struct hostent* he = gethostbyname(host);
+
+    if (he)
+    {
         ip = *(uint32_t*)he->h_addr;
 
         Logger::LogInfo(
@@ -124,6 +208,22 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
             (ip >> 16) & 0xFF,
             (ip >> 8) & 0xFF,
             ip & 0xFF);
+
+        break;
+    }
+
+    char buffer[256];
+    strerror_r(errno, buffer, sizeof(buffer));
+
+    Logger::LogError(
+        "DNS lookup failed (attempt %d/%d): %s",
+        attempt, maxAttempts, buffer);
+
+    if (attempt == maxAttempts)
+        return false;
+
+    thd_sleep(500); // perfect for PPP
+}
     }
 
     // Set up socket
@@ -133,7 +233,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
         return false;
     }
 
-    int bufsize = 65535;
+    int bufsize = s_initialized ? 65535 : 4096;
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
     int flag = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -170,11 +270,16 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
 
     Logger::LogInfo("Writing to: %s", destPath);
 
-    const int recvBufferSize = 32 * 1024;
-    const int sdBufferSize   = 128 * 1024;
+    /*const int recvBufferSize = 32 * 1024;
+    const int sdBufferSize  = 128 * 1024;
 
     static char recvBuffer[recvBufferSize] __attribute__((aligned(32)));
-    static char sdBuffer[sdBufferSize] __attribute__((aligned(32)));
+    static char sdBuffer[sdBufferSize] __attribute__((aligned(32)));*/
+
+        const int recvBufferSize = 4 * 1024;  // 4 KB network buffer
+    const int sdBufferSize   = 32 * 1024;  //256 KB
+    char recvBuffer[recvBufferSize];
+    char sdBuffer[sdBufferSize];
 
     int sdBufUsed = 0;
 

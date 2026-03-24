@@ -28,8 +28,7 @@ bool App::Init()
     Logger::Init(LOG_FQFN);
 #endif
 
-    if (!Network::Init())
-        return false;
+    //Network::Init();
 
     strncpy(m_returnBin, "/sd/demotek.bin", sizeof(m_returnBin));
     m_returnBin[sizeof(m_returnBin) - 1] = '\0';
@@ -69,6 +68,15 @@ void App::Run()
 
     DrawFrame();
 
+    if (!Network::IsInitialized())
+    {
+        Network::Dial(
+        [](const char* msg) {
+             App::s_instance->SetMessage(msg);
+             App::s_instance->DrawFrame();
+        });
+    }
+
     bool updateSuccess = Network::Download(
         m_updateUrl,
         m_overrideBin,
@@ -89,7 +97,6 @@ void App::Run()
 
     Logger::LogInfo("Launching %s", destinationBin);
 
-    SDUpdcast_SetSkip();
     SDUpdcast_Exec(destinationBin, Cleanup);
 }
 
@@ -113,6 +120,8 @@ void App::Cleanup()
     }
 
     Logger::Shutdown();
+
+    SDUpdcast_SetSkip();
 
     fs_fat_unmount_sd();
 }
