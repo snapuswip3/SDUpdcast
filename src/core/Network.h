@@ -7,7 +7,7 @@ public:
     Network() = delete;
 
     static bool Init();
-    static bool IsInitialized() { return s_initialized; }
+    static bool EthernetConnected() { return s_ethernetConnected; }
     static void Shutdown();
 
     using ProgressCallback = void(*)(const char* fmt);
@@ -16,9 +16,9 @@ public:
     static bool Download(const char* url, const char* destPath, ProgressCallback cb = nullptr);
 
 private:
-    static void Notify(ProgressCallback cb, const char* fmt, ...);
+    static void Notify(ProgressCallback cb, int sleep, const char* fmt, ...);
 
-    static bool s_initialized;
+    static bool s_ethernetConnected;
 };
 
 #endif // NETWORK_H

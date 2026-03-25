@@ -28,7 +28,7 @@ bool App::Init()
     Logger::Init(LOG_FQFN);
 #endif
 
-    //Network::Init();
+    Network::Init();
 
     strncpy(m_returnBin, "/sd/demotek.bin", sizeof(m_returnBin));
     m_returnBin[sizeof(m_returnBin) - 1] = '\0';
@@ -68,7 +68,7 @@ void App::Run()
 
     DrawFrame();
 
-    if (!Network::IsInitialized())
+    if (!Network::EthernetConnected())
     {
         Network::Dial(
         [](const char* msg) {

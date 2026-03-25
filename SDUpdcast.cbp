@@ -62,6 +62,13 @@
 		<Unit filename="src/SDUpdcast.h">
 			<Option glob="1343674964" />
 		</Unit>
+		<Unit filename="src/bspatch/bspatch.c">
+			<Option compilerVar="CC" />
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/bspatch/bspatch.h">
+			<Option glob="1343674964" />
+		</Unit>
 		<Unit filename="src/config.h">
 			<Option glob="1343674964" />
 		</Unit>
