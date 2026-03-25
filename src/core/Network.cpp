@@ -240,16 +240,14 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
 
     Logger::LogInfo("Writing to: %s", destPath);
 
-    /*const int recvBufferSize = 32 * 1024;
-    const int sdBufferSize  = 128 * 1024;
+    static const int RECV_BUFFER_SIZE = 32 * 1024;
+    static const int SD_BUFFER_SIZE   = 128 * 1024;
 
-    static char recvBuffer[recvBufferSize] __attribute__((aligned(32)));
-    static char sdBuffer[sdBufferSize] __attribute__((aligned(32)));*/
+    static char recvBuffer[RECV_BUFFER_SIZE] __attribute__((aligned(32)));
+    static char sdBuffer[SD_BUFFER_SIZE] __attribute__((aligned(32)));
 
-        const int recvBufferSize = 4 * 1024;  // 4 KB network buffer
-    const int sdBufferSize   = 32 * 1024;  //32 KB
-    char recvBuffer[recvBufferSize];
-    char sdBuffer[sdBufferSize];
+    int recvChunkSize = s_ethernetConnected ? RECV_BUFFER_SIZE : 4 * 1024;
+    int sdFlushThreshold = s_ethernetConnected ? SD_BUFFER_SIZE : 32 * 1024;
 
     int sdBufUsed = 0;
 
@@ -259,7 +257,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     uint64_t lastUpdate = timer_ms_gettime64();
 
     // Recv loop
-    while ((len = recv(sock, recvBuffer, sizeof(recvBuffer), 0)) > 0) {
+    while ((len = recv(sock, recvBuffer, recvChunkSize, 0)) > 0) {
         int dataOffset = 0;
 
         if (!headerDone) {
@@ -276,7 +274,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
         if (headerDone) {
             int dataLen = len - dataOffset;
 
-            if (sdBufUsed + dataLen > sdBufferSize) {
+            if (sdBufUsed + dataLen > sdFlushThreshold) {
                 int written = 0;
                 while (written < sdBufUsed) {
                     int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
