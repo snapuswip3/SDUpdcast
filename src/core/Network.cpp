@@ -93,7 +93,8 @@ void Network::Shutdown()
     {
         ppp_shutdown();
 
-		if(modem_is_connected() || modem_is_connecting()) {
+		if (modem_is_connected() || modem_is_connecting())
+        {
 			modem_shutdown();
 			net_shutdown();
 		}
@@ -104,21 +105,19 @@ void Network::Shutdown()
 
 bool Network::Dial(ProgressCallback cb)
 {
-    if(!modem_init())
+    if (!modem_init())
     {
         Logger::LogError("modem_init failed");
         return false;
     }
 
     ppp_init();
-    int err = 0;
-
     Notify(cb, 0, "Dialing connection...");
+
     int conn_rate = 0;
-    err = ppp_modem_init("1111111", 0, &conn_rate);
-    if(err != 0)
+    if (ppp_modem_init("1111111", 0, &conn_rate) != 0)
     {
-        Logger::LogError("Couldn't dial a connection (%d)", err);
+        Logger::LogError("Couldn't dial a connection");
         return false;
     }
 
@@ -127,29 +126,26 @@ bool Network::Dial(ProgressCallback cb)
     Notify(cb, 0, "Establishing PPP link...");
     ppp_set_login("dream", "dreamcast");
 
-    err = ppp_connect();
-    if (err != 0)
+    if (ppp_connect() != 0)
     {
-        Logger::LogError("Couldn't establish PPP link (%d)", err);
+        Logger::LogError("Couldn't establish PPP link");
         return false;
     }
 
-    err = net_init(0);
-    if (err < 0)
+    if (net_init(0) < 0)
     {
-        Logger::LogError("net_init fail", err);
+        Logger::LogError("net_init failed");
         return false;
     }
 
-    if(net_default_dev != NULL) {
-		char ip_str[64];
-		memset(ip_str, 0, sizeof(ip_str));
-		snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d",
-			net_default_dev->ip_addr[0], net_default_dev->ip_addr[1],
-			net_default_dev->ip_addr[2], net_default_dev->ip_addr[3]);
-		//setenv("NET_IPV4", ip_str, 1);
-		Logger::LogInfo("Network initialized, IPv4 address: %s", ip_str);
-	}
+    if (net_default_dev)
+    {
+        Logger::LogInfo("IP: %d.%d.%d.%d",
+            net_default_dev->ip_addr[0],
+            net_default_dev->ip_addr[1],
+            net_default_dev->ip_addr[2],
+            net_default_dev->ip_addr[3]);
+    }
 
     return true;
 }
