@@ -4,6 +4,7 @@
 #include "../SDUpdcast.h"
 #include "Logger.h"
 #include "Network.h"
+#include "Utility.h"
 
 extern "C" {
 #include <fatfs.h>
@@ -77,6 +78,8 @@ void App::Run()
         });
     }
 
+    char localMd5[33];
+    bool hasLocalMd5 = Utility::Md5File(m_overrideBin, &localMd5);
     bool updateSuccess = Network::Download(
         m_updateUrl,
         m_overrideBin,

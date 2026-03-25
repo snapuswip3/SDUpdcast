@@ -19,6 +19,7 @@ public:
     };
 
     static MakeDirResult MakeParentDir(const char* path);
+    static bool Md5File(const char* path, char out[33]);
 
     static inline void SkipWhitespace(const char*& p, const char* end)
     {

@@ -150,7 +150,7 @@ bool Network::Dial(ProgressCallback cb)
     return true;
 }
 
-bool Network::Download(const char* url, const char* destPath, ProgressCallback cb)
+bool Network::Download(const char* url, const char* destPath, ProgressCallback cb, const char* localMd5)
 {
     Notify(cb, 1000, "Download:\n%s", destPath);
 
@@ -221,13 +221,22 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
 
     Notify(cb, 1000, "Connected to server:\n%s", host);
 
+    // Prepare path with optional ?md5=
+    char fullPath[192];
+    if (localMd5 && localMd5[0] != '\0') {
+        snprintf(fullPath, sizeof(fullPath), "%s?md5=%s", path, localMd5);
+    } else {
+        strncpy(fullPath, path, sizeof(fullPath));
+        fullPath[sizeof(fullPath)-1] = '\0';
+    }
+
     // Send HTTP Get request
     char request[256];
     snprintf(request, sizeof(request),
              "GET %s HTTP/1.0\r\n"
              "Host: %s\r\n"
              "\r\n",
-             path, host);
+             fullPath, host);
     send(sock, request, strlen(request), 0);
 
     // Open SD File

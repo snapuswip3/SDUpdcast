@@ -210,7 +210,7 @@ static int SDUpdcast_HasSD(void)
     return 0;
 }
 
-static int SDUpdcast_FileExists(const char *path)
+static int SDUpdcast_FileExists(const char *path, size_t *outSize)
 {
     if (!path || !*path)
         return 0;
@@ -220,7 +220,13 @@ static int SDUpdcast_FileExists(const char *path)
         return 0;
 
     /* ensure it's a regular file */
-    return S_ISREG(st.st_mode);
+    if (!S_ISREG(st.st_mode))
+        return 0;
+
+    if (outSize)
+        *outSize = (size_t)st.st_size;
+
+    return 1;
 }
 
 /* =========================================================
@@ -249,12 +255,19 @@ static void SDUpdcast_RunUpdater(
 
     /* fast-path: override bin (only if no update URL) */
     if ((!updateUrl || !*updateUrl) &&
-        (overrideBin && *overrideBin) &&
-        SDUpdcast_FileExists(overrideBin))
+        (overrideBin && *overrideBin))
+    {
+size_t overrideSize = 0; //TODO clean this up and matching check other end
+if (SDUpdcast_FileExists(overrideBin, &overrideSize))
+{
+    /* only fast-path if small enough for RAM */
+    if (overrideSize < 2 * 1024 * 1024)  // e.g., 2 MB limit
     {
         SDUpdcast_SetSkip();
         SDUpdcast_Exec(overrideBin, preExecFunc);
         return;
+    }
+}
     }
 
     SDUpdcast_Write(returnBin, overrideBin, updateUrl);
