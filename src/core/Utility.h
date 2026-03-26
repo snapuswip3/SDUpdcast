@@ -20,6 +20,7 @@ public:
 
     static MakeDirResult MakeParentDir(const char* path);
     static bool Md5File(const char* path, char out[33]);
+    static bool CopyFile(const char* srcPath, const char* destPath, char* buffer, int bufferSize);
 
     static inline void SkipWhitespace(const char*& p, const char* end)
     {

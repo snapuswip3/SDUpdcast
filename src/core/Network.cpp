@@ -1,5 +1,7 @@
 #include "Network.h"
+
 #include "Logger.h"
+#include "Utility.h"
 
 #include <kos.h>
 #include <kos/dbgio.h>
@@ -150,7 +152,7 @@ bool Network::Dial(ProgressCallback cb)
     return true;
 }
 
-bool Network::Download(const char* url, const char* destPath, ProgressCallback cb, const char* localMd5)
+Network::DownloadResult Network::Download(const char* url, const char* destPath, ProgressCallback cb, const char* localMd5)
 {
     Notify(cb, 1000, "Download:\n%s", destPath);
 
@@ -158,14 +160,14 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     const char* hostStart = strstr(url, "http://");
     if (!hostStart) {
         Logger::LogError("Only http:// supported");
-        return false;
+        return DownloadResult::Failure;
     }
     hostStart += 7;
 
     const char* pathStart = strchr(hostStart, '/');
     if (!pathStart) {
         Logger::LogError("Invalid URL (no path)");
-        return false;
+        return DownloadResult::Failure;
     }
 
     char host[64]{};
@@ -183,7 +185,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
         struct hostent* he = gethostbyname(host);
         if (!he) {
             Logger::LogError("DNS lookup failed");
-            return false;
+            return DownloadResult::Failure;
         }
 
         ip = *(uint32_t*)he->h_addr;
@@ -200,7 +202,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         Logger::LogError("Socket creation failed");
-        return false;
+        return DownloadResult::Failure;
     }
 
     int bufsize = s_ethernetConnected ? 65535 : 4096;
@@ -216,7 +218,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     if (connect(sock, (sockaddr*)&addr, sizeof(addr)) < 0) {
         Logger::LogError("Connect failed");
         close(sock);
-        return false;
+        return DownloadResult::Failure;
     }
 
     Notify(cb, 1000, "Connected to server:\n%s", host);
@@ -231,7 +233,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     }
 
     // Send HTTP Get request
-    char request[256];
+    char request[280];
     snprintf(request, sizeof(request),
              "GET %s HTTP/1.0\r\n"
              "Host: %s\r\n"
@@ -239,15 +241,19 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
              fullPath, host);
     send(sock, request, strlen(request), 0);
 
-    // Open SD File
-    file_t f = fs_open(destPath, O_WRONLY | O_CREAT | O_TRUNC);
-    if (f < 0) {
-        Logger::LogError("File open failed: %s", destPath);
-        close(sock);
-        return false;
-    }
+    // Prepare temporary file
+    Utility::MakeParentDir(destPath);
+    char tmpPath[256];
+    snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", destPath);
 
-    Logger::LogInfo("Writing to: %s", destPath);
+    // Open SD File
+    file_t f = fs_open(tmpPath, O_WRONLY | O_CREAT | O_TRUNC);
+    if (f < 0) {
+        Logger::LogError("File open failed: %s", tmpPath);
+        close(sock);
+        return DownloadResult::Failure;
+    }
+    Logger::LogInfo("Writing to: %s", tmpPath);
 
     static const int RECV_BUFFER_SIZE = 32 * 1024;
     static const int SD_BUFFER_SIZE   = 128 * 1024;
@@ -289,7 +295,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
                     int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
                     if (ret <= 0) {
                         Logger::LogError("Write failed");
-                        return false;
+                        return DownloadResult::Failure;
                     }
                     written += ret;
                 }
@@ -318,7 +324,7 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
             int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
             if (ret <= 0) {
                 Logger::LogError("Write failed");
-                return false;
+                return DownloadResult::Failure;
             }
             written += ret;
         }
@@ -327,9 +333,15 @@ bool Network::Download(const char* url, const char* destPath, ProgressCallback c
     fs_close(f);
     close(sock);
 
-    Notify(cb, 1000, "Download complete\n%d KB", totalBytes / 1024);
+    Notify(cb, 1000, "Download complete.\nCopying file...", totalBytes / 1024);
 
-    return true;
+    if (!Utility::CopyFile(tmpPath, destPath, sdBuffer, SD_BUFFER_SIZE)) {
+        Logger::LogError("Failed to copy tmp file to final path");
+        return DownloadResult::Failure;
+    }
+    fs_unlink(tmpPath);
+
+    return DownloadResult::Success;
 }
 
 void Network::Notify(ProgressCallback cb, int sleep, const char* fmt, ...)

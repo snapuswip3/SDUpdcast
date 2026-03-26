@@ -16,6 +16,9 @@ extern "C" {
 #ifndef SDUPDCAST_SAFE_FASTPATH_MAX
 #define SDUPDCAST_SAFE_FASTPATH_MAX (4 * 1024 * 1024) /* 4MB conservative default */
 #endif
+#ifndef SDUPDCAST_EXEC_HEADROOM
+#define SDUPDCAST_EXEC_HEADROOM (2 * 1024 * 1024) /* 2MB safety */
+#endif
 
 /* =========================================================
    Config: shared memory location (top of RAM)
@@ -147,6 +150,41 @@ static void SDUpdcast_SetSkip(void)
     SDUpdcast_Flush();
 }
 
+static int SDUpdcast_CanExec(size_t binarySize)
+{
+    const size_t needed = binarySize + SDUPDCAST_EXEC_HEADROOM;
+
+    /* --- Hard safety cap (avoid large->large chaining) --- */
+    if (binarySize > SDUPDCAST_SAFE_FASTPATH_MAX)
+        return 0;
+
+    /* --- Gather heap info --- */
+    struct mallinfo mi = mallinfo();
+
+    const size_t heapFreeBytes  = (size_t)mi.fordblks;
+    const size_t heapUsedBytes  = (size_t)mi.uordblks;
+
+    /* --- Approx total free system RAM --- */
+    const size_t systemRam = 16 * 1024 * 1024;
+    const size_t totalFreeApprox = systemRam - heapUsedBytes;
+
+    /* --- Quick sanity checks --- */
+    if (needed > totalFreeApprox)
+        return 0;
+
+    if (needed > heapFreeBytes)
+        return 0;
+
+    /* --- Final truth test: contiguous allocation probe --- */
+    void *probe = malloc(needed);
+    if (!probe)
+        return 0;
+
+    free(probe);
+
+    return 1;
+}
+
 /* =========================================================
    Internal: load + exec binary
    ========================================================= */
@@ -236,7 +274,7 @@ static int SDUpdcast_FileExists(const char *path, size_t *outSize)
 /* =========================================================
    PUBLIC: Run updater (main entry point)
    ========================================================= */
-static void SDUpdcast_RunUpdater(
+static inline void SDUpdcast_RunUpdater(
     const char *destinationBin,
     const char *returnBin,
     const char *overrideBin,
@@ -263,7 +301,7 @@ static void SDUpdcast_RunUpdater(
         (overrideBin && *overrideBin) &&
         SDUpdcast_FileExists(overrideBin, &overrideSize))
     {
-        if (overrideSize <= SDUPDCAST_SAFE_FASTPATH_MAX)
+        if (SDUpdcast_CanExec(overrideSize))
         {
             /* safe: small binary */
             SDUpdcast_SetSkip();
@@ -280,7 +318,7 @@ static void SDUpdcast_RunUpdater(
 /* =========================================================
    PUBLIC: Call early in updater/main to read inputs
    ========================================================= */
-static int SDUpdcast_GetParams(
+static inline int SDUpdcast_GetParams(
     char *returnBin,
     char *overrideBin,
     char *updateUrl)

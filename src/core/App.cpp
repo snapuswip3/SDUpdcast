@@ -74,7 +74,16 @@ void App::Run()
     InitFont();
     InitBackground();
 
+    SetMessage("Generating local MD5...");
     DrawFrame();
+
+    char localMd5[33]{};
+    bool hasLocalMd5 = false;
+    bool hasOverrideMd5 = Utility::Md5File(m_overrideBin, localMd5);
+    if (hasOverrideMd5) hasLocalMd5 = true;
+    else hasLocalMd5 = Utility::Md5File(m_returnBin, localMd5);
+
+    Logger::LogInfo("Local MD5: %s", localMd5);
 
     if (!Network::EthernetConnected())
     {
@@ -85,25 +94,40 @@ void App::Run()
         });
     }
 
-    char localMd5[33];
-    bool hasLocalMd5 = Utility::Md5File(m_overrideBin, &localMd5);
-    bool updateSuccess = Network::Download(
+    auto result = Network::Download(
         m_updateUrl,
         m_overrideBin,
         [](const char* msg) {
             App::s_instance->SetMessage(msg);
             App::s_instance->DrawFrame();
-        }
+        },
+        hasLocalMd5 ? localMd5 : nullptr
     );
 
-    if (updateSuccess) SetMessage("Update successful\nlaunching...");
-    else SetMessage("Something went wrong\naborting...");
+    char* destinationBin = nullptr;
+
+    switch (result) {
+        case Network::DownloadResult::Success:
+            destinationBin = m_overrideBin;
+            SetMessage("Update successful\nlaunching...");
+            break;
+        case Network::DownloadResult::NoNeed:
+            destinationBin = hasOverrideMd5 ? m_overrideBin : m_returnBin;
+            SetMessage("Already up to date\nreturning...");
+            break;
+        case Network::DownloadResult::GotPatch:
+            // delta applied
+            break;
+        case Network::DownloadResult::Failure:
+            destinationBin = m_returnBin;
+            SetMessage("Something went wrong\naborting...");
+            break;
+    }
 
     DrawFrame();
     Network::Shutdown();
     thd_sleep(500);
 
-    char* destinationBin = updateSuccess ? m_overrideBin : m_returnBin;
     Logger::LogInfo("Launching %s", destinationBin);
     SDUpdcast_Exec(destinationBin, Cleanup);
 }

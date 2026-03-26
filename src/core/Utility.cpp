@@ -103,3 +103,45 @@ bool Utility::Md5File(const char* path, char out[33])
 
     return true;
 }
+
+bool Utility::CopyFile(const char* srcPath, const char* destPath, char* buffer, int bufferSize)
+{
+    if (!buffer || bufferSize <= 0)
+        return false;
+
+    file_t src = fs_open(srcPath, O_RDONLY);
+    if (src < 0)
+        return false;
+
+    MakeParentDir(destPath);
+
+    file_t dest = fs_open(destPath, O_WRONLY | O_CREAT | O_TRUNC);
+    if (dest < 0) {
+        fs_close(src);
+        return false;
+    }
+
+    int bytesRead = 0;
+    while ((bytesRead = fs_read(src, buffer, bufferSize)) > 0) {
+        int written = 0;
+        while (written < bytesRead) {
+            int ret = fs_write(dest, buffer + written, bytesRead - written);
+            if (ret <= 0) {
+                fs_close(src);
+                fs_close(dest);
+                return false;
+            }
+            written += ret;
+        }
+    }
+
+    if (bytesRead < 0) {
+        fs_close(src);
+        fs_close(dest);
+        return false;
+    }
+
+    fs_close(src);
+    fs_close(dest);
+    return true;
+}
