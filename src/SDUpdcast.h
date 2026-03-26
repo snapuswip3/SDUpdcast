@@ -13,6 +13,10 @@
 extern "C" {
 #endif
 
+#ifndef SDUPDCAST_SAFE_FASTPATH_MAX
+#define SDUPDCAST_SAFE_FASTPATH_MAX (4 * 1024 * 1024) /* 4MB conservative default */
+#endif
+
 /* =========================================================
    Config: shared memory location (top of RAM)
    ========================================================= */
@@ -253,21 +257,19 @@ static void SDUpdcast_RunUpdater(
         }
     }
 
-    /* fast-path: override bin (only if no update URL) */
+    size_t overrideSize = 0;
+
     if ((!updateUrl || !*updateUrl) &&
-        (overrideBin && *overrideBin))
+        (overrideBin && *overrideBin) &&
+        SDUpdcast_FileExists(overrideBin, &overrideSize))
     {
-size_t overrideSize = 0; //TODO clean this up and matching check other end
-if (SDUpdcast_FileExists(overrideBin, &overrideSize))
-{
-    /* only fast-path if small enough for RAM */
-    if (overrideSize < 2 * 1024 * 1024)  // e.g., 2 MB limit
-    {
-        SDUpdcast_SetSkip();
-        SDUpdcast_Exec(overrideBin, preExecFunc);
-        return;
-    }
-}
+        if (overrideSize <= SDUPDCAST_SAFE_FASTPATH_MAX)
+        {
+            /* safe: small binary */
+            SDUpdcast_SetSkip();
+            SDUpdcast_Exec(overrideBin, preExecFunc);
+            return;
+        }
     }
 
     SDUpdcast_Write(returnBin, overrideBin, updateUrl);

@@ -29,8 +29,6 @@ bool App::Init()
     Logger::Init(LOG_FQFN);
 #endif
 
-    Network::Init();
-
     strncpy(m_returnBin, "/sd/demotek.bin", sizeof(m_returnBin));
     m_returnBin[sizeof(m_returnBin) - 1] = '\0';
 
@@ -54,6 +52,15 @@ bool App::Init()
     Logger::LogInfo("Return bin: %s", m_returnBin);
     Logger::LogInfo("Override bin: %s", m_overrideBin);
     Logger::LogInfo("Update URL: %s", m_updateUrl);
+
+    if (!m_updateUrl[0])
+    {
+        char* destinationBin = SDUpdcast_FileExists(m_overrideBin, nullptr) ? m_overrideBin : m_returnBin;
+        Logger::LogInfo("Launching %s", destinationBin);
+        SDUpdcast_Exec(destinationBin, Cleanup);
+    }
+
+    Network::Init();
 
     Logger::LogInfo("App initialized");
 
@@ -97,9 +104,7 @@ void App::Run()
     thd_sleep(500);
 
     char* destinationBin = updateSuccess ? m_overrideBin : m_returnBin;
-
     Logger::LogInfo("Launching %s", destinationBin);
-
     SDUpdcast_Exec(destinationBin, Cleanup);
 }
 
@@ -111,10 +116,10 @@ void App::Shutdown()
 
 void App::Cleanup()
 {
-    pvr_wait_ready();
-
-    if (s_instance)
+    if (s_instance && (s_instance->m_fontTex || s_instance->m_backTex))
     {
+       pvr_wait_ready();
+
        if (s_instance->m_fontTex)
           pvr_mem_free(s_instance->m_fontTex);
 
