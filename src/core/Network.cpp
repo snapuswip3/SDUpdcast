@@ -271,16 +271,44 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
     int totalBytes = 0;
     uint64_t lastUpdate = timer_ms_gettime64();
 
+    int contentLength = -1;
+
     // Recv loop
     while ((len = recv(sock, recvBuffer, recvChunkSize, 0)) > 0) {
         int dataOffset = 0;
 
+        //TODO header may be an over-simplification (assuming it all comes in 1 recv right now)
         if (!headerDone) {
             for (int i = 0; i < len - 3; i++) {
                 if (recvBuffer[i] == '\r' && recvBuffer[i+1] == '\n' &&
                     recvBuffer[i+2] == '\r' && recvBuffer[i+3] == '\n') {
+
                     headerDone = true;
                     dataOffset = i + 4;
+
+                    // Parse headers
+                    const char* p = recvBuffer;
+                    const char* end = recvBuffer + dataOffset;
+
+                    char token[64];
+
+                    while (p < end) {
+                        const char* lineStart = p;
+
+                        if (Utility::ParseToken(p, end, token, sizeof(token))) {
+                            if (strcmp(token, "Content-Length:") == 0) {
+                                Utility::SkipWhitespace(p, end);
+                                contentLength = Utility::ParseInt(p, end);
+                                Logger::LogInfo("Content-Length: %d", contentLength);
+                            }
+                        }
+
+                        // Always advance to next line
+                        Utility::SkipLine(p, end);
+                        // Malformed line, force progress
+                        if (p == lineStart) ++p;
+                    }
+
                     break;
                 }
             }
@@ -312,7 +340,8 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
         uint64_t now = timer_ms_gettime64();
         if (cb && now - lastUpdate > 100) {
             char msg[64];
-            snprintf(msg, sizeof(msg), "Downloading...\n%d KB", totalBytes / 1024);
+            if (contentLength > 0) snprintf(msg, sizeof(msg), "Downloading...\n%d KB of %d KB", totalBytes / 1024, contentLength / 1024);
+            else snprintf(msg, sizeof(msg), "Downloading...\n%d KB", totalBytes / 1024);
             cb(msg);
             lastUpdate = now;
         }
