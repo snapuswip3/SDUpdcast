@@ -24,6 +24,7 @@ public:
     static DownloadResult  Download(const char* url, const char* destPath, ProgressCallback cb = nullptr, const char* localMd5 = nullptr);
 
 private:
+    static void ParseHeaders(const char* buffer, int len, int& httpStatus, int& contentLength, char* serverMd5, int serverMd5Size);
     static void Notify(ProgressCallback cb, int sleep, const char* fmt, ...);
 
     static bool s_ethernetConnected;

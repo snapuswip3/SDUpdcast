@@ -271,7 +271,9 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
     int totalBytes = 0;
     uint64_t lastUpdate = timer_ms_gettime64();
 
+    int httpStatus = 0;
     int contentLength = -1;
+    char serverMd5[33]{};
 
     // Recv loop
     while ((len = recv(sock, recvBuffer, recvChunkSize, 0)) > 0) {
@@ -286,27 +288,11 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
                     headerDone = true;
                     dataOffset = i + 4;
 
-                    // Parse headers
-                    const char* p = recvBuffer;
-                    const char* end = recvBuffer + dataOffset;
+                    ParseHeaders(recvBuffer, dataOffset, httpStatus, contentLength, serverMd5, sizeof(serverMd5));
 
-                    char token[64];
-
-                    while (p < end) {
-                        const char* lineStart = p;
-
-                        if (Utility::ParseToken(p, end, token, sizeof(token))) {
-                            if (strcmp(token, "Content-Length:") == 0) {
-                                Utility::SkipWhitespace(p, end);
-                                contentLength = Utility::ParseInt(p, end);
-                                Logger::LogInfo("Content-Length: %d", contentLength);
-                            }
-                        }
-
-                        // Always advance to next line
-                        Utility::SkipLine(p, end);
-                        // Malformed line, force progress
-                        if (p == lineStart) ++p;
+                    if (httpStatus == 204) {
+                        Logger::LogInfo("No update needed (204)");
+                        return DownloadResult::NoNeed;
                     }
 
                     break;
@@ -362,7 +348,20 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
     fs_close(f);
     close(sock);
 
-    Notify(cb, 1000, "Download complete.\nCopying file...", totalBytes / 1024);
+    Notify(cb, 1000, "Download complete.\nChecking integrity...", totalBytes / 1024);
+
+    char tmpMd5[33]{};
+    if (!Utility::Md5File(tmpPath, tmpMd5)) {
+        Logger::LogError("Failed to calculate MD5 of downloaded file");
+        return DownloadResult::Failure;
+    }
+
+    if (strcmp(tmpMd5, serverMd5) != 0) {
+        Logger::LogError("MD5 mismatch! local: %s, server: %s", tmpMd5, serverMd5);
+        return DownloadResult::Failure;
+    }
+
+    Notify(cb, 1000, "File OK.\nCopying...", totalBytes / 1024);
 
     if (!Utility::CopyFile(tmpPath, destPath, sdBuffer, SD_BUFFER_SIZE)) {
         Logger::LogError("Failed to copy tmp file to final path");
@@ -371,6 +370,54 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
     fs_unlink(tmpPath);
 
     return DownloadResult::Success;
+}
+
+void Network::ParseHeaders(
+    const char* buffer,
+    int len,
+    int& httpStatus,
+    int& contentLength,
+    char* serverMd5,
+    int serverMd5Size)
+{
+    const char* p = buffer;
+    const char* end = buffer + len;
+
+    char token[64];
+
+    while (p < end) {
+        const char* lineStart = p;
+
+        if (Utility::ParseToken(p, end, token, sizeof(token))) {
+
+            if (strncmp(token, "HTTP/", 5) == 0) {
+                if (Utility::ParseToken(p, end, token, sizeof(token))) {
+                    const char* tp = token;
+                    httpStatus = Utility::ParseInt(tp, token + strlen(token));
+                    Logger::LogInfo("HTTP Status: %d", httpStatus);
+                }
+            }
+            else if (strcmp(token, "Content-Length:") == 0) {
+                Utility::SkipWhitespace(p, end);
+                contentLength = Utility::ParseInt(p, end);
+                Logger::LogInfo("Content-Length: %d", contentLength);
+            }
+            else if (strcmp(token, "X-Update-MD5:") == 0) {
+                Utility::SkipWhitespace(p, end);
+                if (Utility::ParseToken(p, end, token, sizeof(token))) {
+                    int copyLen = (int)strlen(token);
+                    if (copyLen >= serverMd5Size) copyLen = serverMd5Size - 1;
+                    memcpy(serverMd5, token, copyLen);
+                    serverMd5[copyLen] = '\0';
+                    Logger::LogInfo("Server MD5: %s", serverMd5);
+                }
+            }
+        }
+
+        Utility::SkipLine(p, end);
+        // force progress if malformed line
+        if (p == lineStart) ++p;
+    }
 }
 
 void Network::Notify(ProgressCallback cb, int sleep, const char* fmt, ...)
