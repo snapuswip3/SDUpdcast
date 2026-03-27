@@ -3,6 +3,8 @@
 #include "Logger.h"
 #include "Utility.h"
 
+#include "../bspatch/bspatchlib.h"
+
 #include <kos.h>
 #include <kos/dbgio.h>
 #include <netdb.h>
@@ -152,7 +154,7 @@ bool Network::Dial(ProgressCallback cb)
     return true;
 }
 
-Network::DownloadResult Network::Download(const char* url, const char* destPath, ProgressCallback cb, const char* localMd5)
+Network::DownloadResult Network::Download(const char* url, const char* localPath, const char* destPath, ProgressCallback cb, const char* localMd5)
 {
     Notify(cb, 1000, "Download:\n%s", destPath);
 
@@ -274,6 +276,7 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
     int httpStatus = 0;
     int contentLength = -1;
     char serverMd5[33]{};
+    int patchedSize = -1;
 
     // Recv loop
     while ((len = recv(sock, recvBuffer, recvChunkSize, 0)) > 0) {
@@ -288,10 +291,12 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
                     headerDone = true;
                     dataOffset = i + 4;
 
-                    ParseHeaders(recvBuffer, dataOffset, httpStatus, contentLength, serverMd5, sizeof(serverMd5));
+                    ParseHeaders(recvBuffer, dataOffset, httpStatus, contentLength, serverMd5, sizeof(serverMd5), patchedSize);
 
                     if (httpStatus == 204) {
                         Logger::LogInfo("No update needed (204)");
+                        fs_close(f);
+                        close(sock);
                         return DownloadResult::NoNeed;
                     }
 
@@ -309,6 +314,8 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
                     int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
                     if (ret <= 0) {
                         Logger::LogError("Write failed");
+                        fs_close(f);
+                        close(sock);
                         return DownloadResult::Failure;
                     }
                     written += ret;
@@ -339,6 +346,8 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
             int ret = fs_write(f, sdBuffer + written, sdBufUsed - written);
             if (ret <= 0) {
                 Logger::LogError("Write failed");
+                fs_close(f);
+                close(sock);
                 return DownloadResult::Failure;
             }
             written += ret;
@@ -348,7 +357,31 @@ Network::DownloadResult Network::Download(const char* url, const char* destPath,
     fs_close(f);
     close(sock);
 
-    Notify(cb, 1000, "Download complete.\nChecking integrity...", totalBytes / 1024);
+    if (patchedSize != -1)
+    {
+        Notify(cb, 1000, "Download complete.\nPatching...", totalBytes / 1024);
+
+        char patPath[256];
+        snprintf(patPath, sizeof(patPath), "%s.pat", destPath);
+
+        if (!Utility::CopyFile(tmpPath, patPath, sdBuffer, SD_BUFFER_SIZE)) {
+            Logger::LogError("Failed to copy tmp file to patch path");
+            return DownloadResult::Failure;
+        }
+
+        if (!ApplyPatch(localPath, patPath, tmpPath, patchedSize)) {
+            Logger::LogError("Patch application failed");
+            return DownloadResult::Failure;
+        }
+
+        fs_unlink(patPath);
+
+        Notify(cb, 1000, "Patching complete.\nChecking integrity...", totalBytes / 1024);
+    }
+    else
+    {
+        Notify(cb, 1000, "Download complete.\nChecking integrity...", totalBytes / 1024);
+    }
 
     char tmpMd5[33]{};
     if (!Utility::Md5File(tmpPath, tmpMd5)) {
@@ -378,7 +411,8 @@ void Network::ParseHeaders(
     int& httpStatus,
     int& contentLength,
     char* serverMd5,
-    int serverMd5Size)
+    int serverMd5Size,
+    int& patchedSize)
 {
     const char* p = buffer;
     const char* end = buffer + len;
@@ -412,12 +446,96 @@ void Network::ParseHeaders(
                     Logger::LogInfo("Server MD5: %s", serverMd5);
                 }
             }
+            else if (strcmp(token, "X-Patched-Size:") == 0) {
+                Utility::SkipWhitespace(p, end);
+                patchedSize = Utility::ParseInt(p, end);
+                Logger::LogInfo("Patched Size: %d", patchedSize);
+            }
         }
 
         Utility::SkipLine(p, end);
         // force progress if malformed line
         if (p == lineStart) ++p;
     }
+}
+
+bool Network::ApplyPatch(const char* oldPath, const char* patchPath, const char* outPath, int newSize)
+{
+    if (!oldPath || !patchPath || !outPath) return false;
+
+    file_t fOld = -1, fPatch = -1, fOut = -1;
+    uint8_t *oldBuf = nullptr, *patchBuf = nullptr, *newBuf = nullptr;
+    int oldSize = 0, patchSize = 0;
+    char *err = nullptr;
+
+    auto read_full = [](file_t f, uint8_t* buf, int len) -> bool {
+        int total = 0;
+        while (total < len) {
+            int r = fs_read(f, buf + total, len - total);
+            if (r <= 0) return false;
+            total += r;
+        }
+        return true;
+    };
+
+    auto write_full = [](file_t f, const uint8_t* buf, int len) -> bool {
+        int total = 0;
+        while (total < len) {
+            int w = fs_write(f, buf + total, len - total);
+            if (w <= 0) return false;
+            total += w;
+        }
+        return true;
+    };
+
+    auto get_file_size = [](file_t f) -> int {
+        int cur = fs_seek(f, 0, SEEK_CUR);
+        int end = fs_seek(f, 0, SEEK_END);
+        fs_seek(f, cur, SEEK_SET);
+        return end;
+    };
+
+    // --- Load old file into memory ---
+    fOld = fs_open(oldPath, O_RDONLY);
+    if (fOld < 0) { Logger::LogError("ApplyPatch: open old failed"); goto cleanup; }
+    oldSize = get_file_size(fOld);
+    fs_seek(fOld, 0, SEEK_SET);
+    oldBuf = (uint8_t*)malloc(oldSize);
+    if (!oldBuf) { Logger::LogError("ApplyPatch: alloc oldBuf failed"); goto cleanup; }
+    if (!read_full(fOld, oldBuf, oldSize)) { Logger::LogError("ApplyPatch: read old failed"); goto cleanup; }
+    fs_close(fOld); fOld = -1;
+
+    // --- Load patch file into memory ---
+    fPatch = fs_open(patchPath, O_RDONLY);
+    if (fPatch < 0) { Logger::LogError("ApplyPatch: open patch failed"); goto cleanup; }
+    patchSize = get_file_size(fPatch);
+    fs_seek(fPatch, 0, SEEK_SET);
+    patchBuf = (uint8_t*)malloc(patchSize);
+    if (!patchBuf) { Logger::LogError("ApplyPatch: alloc patchBuf failed"); goto cleanup; }
+    if (!read_full(fPatch, patchBuf, patchSize)) { Logger::LogError("ApplyPatch: read patch failed"); goto cleanup; }
+    fs_close(fPatch); fPatch = -1;
+
+    // --- Apply patch in memory ---
+    err = bspatch_mem(oldBuf, oldSize, &newBuf, &newSize,
+                            patchBuf, patchSize,
+                            -1, -1, -1); // pass uncompressed ctrl/diff/xtra sizes if known, else 0
+    if (err) { Logger::LogError(err); goto cleanup; }
+
+    // --- Write new file ---
+    fOut = fs_open(outPath, O_WRONLY | O_CREAT | O_TRUNC);
+    if (fOut < 0) { Logger::LogError("ApplyPatch: open out failed"); goto cleanup; }
+    if (!write_full(fOut, (uint8_t*)newBuf, newSize)) { Logger::LogError("ApplyPatch: write failed"); goto cleanup; }
+    fs_close(fOut); fOut = -1;
+
+    free(oldBuf); free(patchBuf); free(newBuf);
+    return true;
+
+cleanup:
+    if (fOld  >= 0) fs_close(fOld);
+    if (fPatch>= 0) fs_close(fPatch);
+    if (fOut  >= 0) fs_close(fOut);
+    free(oldBuf); free(patchBuf); free(newBuf);
+    return false;
 }
 
 void Network::Notify(ProgressCallback cb, int sleep, const char* fmt, ...)

@@ -96,6 +96,7 @@ void App::Run()
 
     auto result = Network::Download(
         m_updateUrl,
+        hasOverrideMd5 ? m_overrideBin : m_returnBin,
         m_overrideBin,
         [](const char* msg) {
             App::s_instance->SetMessage(msg);
@@ -109,18 +110,15 @@ void App::Run()
     switch (result) {
         case Network::DownloadResult::Success:
             destinationBin = m_overrideBin;
-            SetMessage("Update successful\nlaunching...");
+            SetMessage("Update successful!\nLaunching...");
             break;
         case Network::DownloadResult::NoNeed:
             destinationBin = hasOverrideMd5 ? m_overrideBin : m_returnBin;
-            SetMessage("Already up to date\nreturning...");
-            break;
-        case Network::DownloadResult::GotPatch:
-            // delta applied
+            SetMessage("Already up to date.\nReturning...");
             break;
         case Network::DownloadResult::Failure:
             destinationBin = m_returnBin;
-            SetMessage("Something went wrong\naborting...");
+            SetMessage("Something went wrong.\nAborting...");
             break;
     }
 

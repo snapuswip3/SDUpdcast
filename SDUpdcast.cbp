@@ -49,6 +49,7 @@
 			<Add library="z" />
 			<Add library="ppp" />
 			<Add library="kosutils" />
+			<Add library="bz2" />
 		</Linker>
 		<ExtraCommands>
 			<Add before='cmd /c &quot;$(PROJECT_DIR)build_wfont.bat $(TARGET_OBJECT_DIR)&quot;' />
@@ -63,11 +64,11 @@
 		<Unit filename="src/SDUpdcast.h">
 			<Option glob="1343674964" />
 		</Unit>
-		<Unit filename="src/bspatch/bspatch.c">
+		<Unit filename="src/bspatch/bspatchlib.c">
 			<Option compilerVar="CC" />
 			<Option glob="1343674964" />
 		</Unit>
-		<Unit filename="src/bspatch/bspatch.h">
+		<Unit filename="src/bspatch/bspatchlib.h">
 			<Option glob="1343674964" />
 		</Unit>
 		<Unit filename="src/config.h">
