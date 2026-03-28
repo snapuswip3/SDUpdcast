@@ -22,7 +22,7 @@ Please let me know of any issues, I have probably rushed it out a bit, but I'm k
 Usage: 
 
 ```
-\#include "SDUpdcast.h"
+#include "SDUpdcast.h"
 
 static void ShutdownAndExit()
 {
@@ -31,7 +31,7 @@ static void ShutdownAndExit()
     arch\_abort();
 }
 
-int main(int argc, char \*argv\[])
+int main(int argc, char *argv\[])
 {
     fs\_fat\_mount\_sd();
 
@@ -46,7 +46,7 @@ int main(int argc, char \*argv\[])
         );
     }
 
-    App\* app = new App();
+    App* app = new App();
 
     if (!app->Init())
     {
@@ -63,7 +63,6 @@ int main(int argc, char \*argv\[])
     delete app;
 
     if (dcload\_type != DCLOAD\_TYPE\_IP \&\& runUpdater)
-
     {
         SDUpdcast\_RunUpdater(
             "/cd/SDUpdcast.bin",
