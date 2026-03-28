@@ -26,23 +26,23 @@ Usage:
 
 static void ShutdownAndExit()
 {
-    fs\_fat\_unmount\_sd();
-    sd\_shutdown();
-    arch\_abort();
+    fs_fat_unmount_sd();
+    sd_shutdown();
+    arch_abort();
 }
 
 int main(int argc, char *argv\[])
 {
-    fs\_fat\_mount\_sd();
+    fs_fat_mount_sd();
 
-    if (dcload\_type != DCLOAD\_TYPE\_IP) // Can be flaky if you're running with DCLOAD, I would suggest Dreamshell as a good way to test your integration
+    if (dcload_type != DCLOAD_TYPE_IP) // Can be flaky if you're running with DCLOAD, I would suggest Dreamshell as a good way to test your integration
     {
-        SDUpdcast\_RunUpdater(
+        SDUpdcast_RunUpdater(
             "/cd/SDUpdcast.bin",
-            "/cd/your\_app.bin",
-            "/sd/your\_app/your\_app.bin",
+            "/cd/your_app.bin",
+            "/sd/your_app/your_app.bin",
             nullptr, // Don't look online for updates, just look for the update we already have
-            fs\_fat\_unmount\_sd // pass any last minute cleanup in here
+            fs_fat_unmount_sd // pass any last minute cleanup in here
         );
     }
 
@@ -62,14 +62,14 @@ int main(int argc, char *argv\[])
 
     delete app;
 
-    if (dcload\_type != DCLOAD\_TYPE\_IP \&\& runUpdater)
+    if (dcload_type != DCLOAD_TYPE_IP && runUpdater)
     {
-        SDUpdcast\_RunUpdater(
+        SDUpdcast_RunUpdater(
             "/cd/SDUpdcast.bin",
-            "/cd/your\_app.bin",
-            "/sd/your\_app/your\_app.bin",
+            "/cd/your_app.bin",
+            "/sd/your_app/your_app.bin",
             "http://yourwebsite.com/dc/update.bin",
-            fs\_fat\_unmount\_sd
+            fs_fat_unmount_sd
         );
     }
 
