@@ -29,13 +29,13 @@ bool App::Init()
     Logger::Init(LOG_FQFN);
 #endif
 
-    /*strncpy(m_returnBin, "/sd/demotek.bin", sizeof(m_returnBin));
+    /*strncpy(m_returnBin, "/sd/return.bin", sizeof(m_returnBin));
     m_returnBin[sizeof(m_returnBin) - 1] = '\0';
 
-    strncpy(m_overrideBin, "/sd/demotek.bin", sizeof(m_overrideBin));
+    strncpy(m_overrideBin, "/sd/override.bin", sizeof(m_overrideBin));
     m_overrideBin[sizeof(m_overrideBin) - 1] = '\0';
 
-    strncpy(m_updateUrl, "http://ac3t1ne.co.uk/dc/demotek.bin", sizeof(m_updateUrl));
+    strncpy(m_updateUrl, "http://yoursite.com/dc/update.bin", sizeof(m_updateUrl));
     m_updateUrl[sizeof(m_updateUrl) - 1] = '\0';*/
 
     if (!SDUpdcast_GetParams(m_returnBin, m_overrideBin, m_updateUrl))
@@ -43,11 +43,6 @@ bool App::Init()
         Logger::LogError("Couldn't retrieve parameters. Exiting.");
         return false;
     }
-
-#ifndef DEBUG
-    cdrom_init();
-    fs_iso9660_init();
-#endif
 
     Logger::LogInfo("Return bin: %s", m_returnBin);
     Logger::LogInfo("Override bin: %s", m_overrideBin);

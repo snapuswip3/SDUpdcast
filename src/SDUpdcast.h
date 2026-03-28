@@ -279,7 +279,7 @@ static inline void SDUpdcast_RunUpdater(
     const char *updateUrl,
     SDUpdcast_PreExecFunc preExecFunc)
 {
-    if (!destinationBin || !*destinationBin || !SDUpdcast_HasSD())
+    if (!destinationBin || !*destinationBin || !overrideBin || !*overrideBin || !SDUpdcast_HasSD())
         return;
 
     int skip = 0;
@@ -293,19 +293,21 @@ static inline void SDUpdcast_RunUpdater(
         }
     }
 
-    size_t overrideSize = 0;
-
-    if ((!updateUrl || !*updateUrl) &&
-        (overrideBin && *overrideBin) &&
-        SDUpdcast_FileExists(overrideBin, &overrideSize))
+    if (!updateUrl || !*updateUrl)
     {
-        if (SDUpdcast_CanExec(overrideSize))
+        size_t overrideSize = 0;
+        if (SDUpdcast_FileExists(overrideBin, &overrideSize))
         {
-            /* safe: small binary */
-            SDUpdcast_SetSkip();
-            SDUpdcast_Exec(overrideBin, preExecFunc);
-            return;
+            if (SDUpdcast_CanExec(overrideSize))
+            {
+                /* safe: small binary */
+                SDUpdcast_SetSkip();
+                SDUpdcast_Exec(overrideBin, preExecFunc);
+                return;
+            }
         }
+        else
+            return;
     }
 
     SDUpdcast_Write(returnBin, overrideBin, updateUrl);
