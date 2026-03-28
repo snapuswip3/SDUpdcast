@@ -31,7 +31,7 @@ static void ShutdownAndExit()
     arch_abort();
 }
 
-int main(int argc, char *argv\[])
+int main(int argc, char *argv[])
 {
     fs_fat_mount_sd();
 
