@@ -1,9 +1,8 @@
 #include "Network.h"
 
 #include "Logger.h"
+#include "Patcher.h"
 #include "Utility.h"
-
-#include "../bspatch/bspatchlib.h"
 
 #include <kos.h>
 #include <kos/dbgio.h>
@@ -182,7 +181,7 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
     // Resolve IP
     uint32_t ip = inet_addr(host);
     if (ip == INADDR_NONE) {
-        Notify(cb, 1000, "Resolving hostname:\n%s", host);
+        Notify(cb, 500, "Resolving hostname:\n%s", host);
 
         struct hostent* he = gethostbyname(host);
         if (!he) {
@@ -207,7 +206,7 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
         return DownloadResult::Failure;
     }
 
-    int bufsize = s_ethernetConnected ? 65535 : 4096;
+    int bufsize = s_ethernetConnected ? /*65535*/ (16 * 1024) : 4096; // Was having trouble with missing data on bba at 65535 YMMV
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
     int flag = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -223,7 +222,7 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
         return DownloadResult::Failure;
     }
 
-    Notify(cb, 1000, "Connected to server:\n%s", host);
+    Notify(cb, 500, "Connected to server:\n%s", host);
 
     // Prepare path with optional ?md5=
     char fullPath[192];
@@ -257,8 +256,8 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
     }
     Logger::LogInfo("Writing to: %s", tmpPath);
 
-    static const int RECV_BUFFER_SIZE = 32 * 1024;
-    static const int SD_BUFFER_SIZE   = 128 * 1024;
+    static const int RECV_BUFFER_SIZE = 16 * 1024;
+    static const int SD_BUFFER_SIZE = 64 * 1024;
 
     static char recvBuffer[RECV_BUFFER_SIZE] __attribute__((aligned(32)));
     static char sdBuffer[SD_BUFFER_SIZE] __attribute__((aligned(32)));
@@ -277,6 +276,8 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
     int contentLength = -1;
     char serverMd5[33]{};
     int patchedSize = -1;
+
+    thd_sleep(1);
 
     // Recv loop
     while ((len = recv(sock, recvBuffer, recvChunkSize, 0)) > 0) {
@@ -359,28 +360,36 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
 
     if (patchedSize != -1)
     {
-        Notify(cb, 1000, "Download complete.\nPatching...", totalBytes / 1024);
+        Notify(cb, 0, "Download complete.\nPatching...", totalBytes / 1024);
 
         char patPath[256];
         snprintf(patPath, sizeof(patPath), "%s.pat", destPath);
 
+        bool patchSuccess = true;
+
         if (!Utility::CopyFile(tmpPath, patPath, sdBuffer, SD_BUFFER_SIZE)) {
             Logger::LogError("Failed to copy tmp file to patch path");
-            return DownloadResult::Failure;
+            patchSuccess = false;
+        }
+        else if (!Patcher::ApplyPatch(localPath, patPath, tmpPath, patchedSize)) {
+            Logger::LogError("Patch application failed");
+            fs_unlink(patPath);
+            patchSuccess = false;
         }
 
-        if (!ApplyPatch(localPath, patPath, tmpPath, patchedSize)) {
-            Logger::LogError("Patch application failed");
-            return DownloadResult::Failure;
+        if (!patchSuccess) {
+            Notify(cb, 1000, "Could not patch.\nRetry full download...", totalBytes / 1024);
+            // Retry without local MD5 to force full download
+            return Download(url, localPath, destPath, cb);
         }
 
         fs_unlink(patPath);
 
-        Notify(cb, 1000, "Patching complete.\nChecking integrity...", totalBytes / 1024);
+        Notify(cb, 0, "Patching complete.\nChecking integrity...", totalBytes / 1024);
     }
     else
     {
-        Notify(cb, 1000, "Download complete.\nChecking integrity...", totalBytes / 1024);
+        Notify(cb, 0, "Download complete.\nChecking integrity...", totalBytes / 1024);
     }
 
     char tmpMd5[33]{};
@@ -394,7 +403,7 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
         return DownloadResult::Failure;
     }
 
-    Notify(cb, 1000, "File OK.\nCopying...", totalBytes / 1024);
+    Notify(cb, 0, "File OK.\nCopying...", totalBytes / 1024);
 
     if (!Utility::CopyFile(tmpPath, destPath, sdBuffer, SD_BUFFER_SIZE)) {
         Logger::LogError("Failed to copy tmp file to final path");
@@ -457,85 +466,6 @@ void Network::ParseHeaders(
         // force progress if malformed line
         if (p == lineStart) ++p;
     }
-}
-
-bool Network::ApplyPatch(const char* oldPath, const char* patchPath, const char* outPath, int newSize)
-{
-    if (!oldPath || !patchPath || !outPath) return false;
-
-    file_t fOld = -1, fPatch = -1, fOut = -1;
-    uint8_t *oldBuf = nullptr, *patchBuf = nullptr, *newBuf = nullptr;
-    int oldSize = 0, patchSize = 0;
-    char *err = nullptr;
-
-    auto read_full = [](file_t f, uint8_t* buf, int len) -> bool {
-        int total = 0;
-        while (total < len) {
-            int r = fs_read(f, buf + total, len - total);
-            if (r <= 0) return false;
-            total += r;
-        }
-        return true;
-    };
-
-    auto write_full = [](file_t f, const uint8_t* buf, int len) -> bool {
-        int total = 0;
-        while (total < len) {
-            int w = fs_write(f, buf + total, len - total);
-            if (w <= 0) return false;
-            total += w;
-        }
-        return true;
-    };
-
-    auto get_file_size = [](file_t f) -> int {
-        int cur = fs_seek(f, 0, SEEK_CUR);
-        int end = fs_seek(f, 0, SEEK_END);
-        fs_seek(f, cur, SEEK_SET);
-        return end;
-    };
-
-    // --- Load old file into memory ---
-    fOld = fs_open(oldPath, O_RDONLY);
-    if (fOld < 0) { Logger::LogError("ApplyPatch: open old failed"); goto cleanup; }
-    oldSize = get_file_size(fOld);
-    fs_seek(fOld, 0, SEEK_SET);
-    oldBuf = (uint8_t*)malloc(oldSize);
-    if (!oldBuf) { Logger::LogError("ApplyPatch: alloc oldBuf failed"); goto cleanup; }
-    if (!read_full(fOld, oldBuf, oldSize)) { Logger::LogError("ApplyPatch: read old failed"); goto cleanup; }
-    fs_close(fOld); fOld = -1;
-
-    // --- Load patch file into memory ---
-    fPatch = fs_open(patchPath, O_RDONLY);
-    if (fPatch < 0) { Logger::LogError("ApplyPatch: open patch failed"); goto cleanup; }
-    patchSize = get_file_size(fPatch);
-    fs_seek(fPatch, 0, SEEK_SET);
-    patchBuf = (uint8_t*)malloc(patchSize);
-    if (!patchBuf) { Logger::LogError("ApplyPatch: alloc patchBuf failed"); goto cleanup; }
-    if (!read_full(fPatch, patchBuf, patchSize)) { Logger::LogError("ApplyPatch: read patch failed"); goto cleanup; }
-    fs_close(fPatch); fPatch = -1;
-
-    // --- Apply patch in memory ---
-    err = bspatch_mem(oldBuf, oldSize, &newBuf, &newSize,
-                            patchBuf, patchSize,
-                            -1, -1, -1); // pass uncompressed ctrl/diff/xtra sizes if known, else 0
-    if (err) { Logger::LogError(err); goto cleanup; }
-
-    // --- Write new file ---
-    fOut = fs_open(outPath, O_WRONLY | O_CREAT | O_TRUNC);
-    if (fOut < 0) { Logger::LogError("ApplyPatch: open out failed"); goto cleanup; }
-    if (!write_full(fOut, (uint8_t*)newBuf, newSize)) { Logger::LogError("ApplyPatch: write failed"); goto cleanup; }
-    fs_close(fOut); fOut = -1;
-
-    free(oldBuf); free(patchBuf); free(newBuf);
-    return true;
-
-cleanup:
-    if (fOld  >= 0) fs_close(fOld);
-    if (fPatch>= 0) fs_close(fPatch);
-    if (fOut  >= 0) fs_close(fOut);
-    free(oldBuf); free(patchBuf); free(newBuf);
-    return false;
 }
 
 void Network::Notify(ProgressCallback cb, int sleep, const char* fmt, ...)

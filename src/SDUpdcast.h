@@ -244,11 +244,9 @@ static int SDUpdcast_HasSD(void)
     uint32_t total_sectors = sd_get_size();
 
     if (total_sectors > 0) {
-        // SD card is present and has space
         return 1;
     }
 
-    // No SD card detected
     return 0;
 }
 

@@ -29,20 +29,20 @@ bool App::Init()
     Logger::Init(LOG_FQFN);
 #endif
 
-    strncpy(m_returnBin, "/sd/demotek.bin", sizeof(m_returnBin));
+    /*strncpy(m_returnBin, "/sd/demotek.bin", sizeof(m_returnBin));
     m_returnBin[sizeof(m_returnBin) - 1] = '\0';
 
     strncpy(m_overrideBin, "/sd/demotek.bin", sizeof(m_overrideBin));
     m_overrideBin[sizeof(m_overrideBin) - 1] = '\0';
 
     strncpy(m_updateUrl, "http://ac3t1ne.co.uk/dc/demotek.bin", sizeof(m_updateUrl));
-    m_updateUrl[sizeof(m_updateUrl) - 1] = '\0';
+    m_updateUrl[sizeof(m_updateUrl) - 1] = '\0';*/
 
-    /*if (!SDUpdcast_GetParams(m_returnBin, m_overrideBin, m_updateUrl))
+    if (!SDUpdcast_GetParams(m_returnBin, m_overrideBin, m_updateUrl))
     {
         Logger::LogError("Couldn't retrieve parameters. Exiting.");
         return false;
-    }*/
+    }
 
 #ifndef DEBUG
     cdrom_init();
@@ -318,9 +318,16 @@ void App::DrawFrame()
 
     pvr_list_begin(PVR_LIST_TR_POLY);
 
-    DrawString(40,  // <-- top-left X
-               160, // <-- top-left Y
+    DrawString(20,
+               30,
                3,
+               1,1,1,1,
+               (char*)"Powered by KallistiOS",
+               1,1);
+
+    DrawString(40,
+               160,
+               4,
                1,1,1,1,
                m_currentMessage,
                2,2);

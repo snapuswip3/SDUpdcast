@@ -92,6 +92,12 @@
 		<Unit filename="src/core/Network.h">
 			<Option glob="1343674964" />
 		</Unit>
+		<Unit filename="src/core/Patcher.cpp">
+			<Option glob="1343674964" />
+		</Unit>
+		<Unit filename="src/core/Patcher.h">
+			<Option glob="1343674964" />
+		</Unit>
 		<Unit filename="src/core/Utility.cpp">
 			<Option glob="1343674964" />
 		</Unit>
