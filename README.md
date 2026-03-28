@@ -16,6 +16,8 @@ Check in the misc folder for
 
 Big thanks to everyone who works on KallistiOS and on the Simulant discord.
 I hope I've given all the appropriate credits, I would love to see this used in Dreamcast homebrew (and I don't mind if you change it).
+Thanks petervas for bsdifflib, see the LICENSE test in the bspatch folder.
+This project also needs zlib, libpng and libbz2 to build, you can get them as KOS Ports, but their own licenses may apply.
 
 Please let me know of any issues, I have probably rushed it out a bit, but I'm keen to get back on with my game!!
 
