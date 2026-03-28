@@ -36,7 +36,7 @@ Please let me know of any issues, I have probably rushed it out a bit, but I'm k
 
 Usage: 
 
-
+```
 
 \#include "SDUpdcast.h"
 
@@ -143,4 +143,6 @@ int main(int argc, char \*argv\[])
 &#x20;   return 0;
 
 }
+
+```
 
