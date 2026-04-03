@@ -317,7 +317,7 @@ void App::DrawFrame()
                30,
                3,
                1,1,1,1,
-               (char*)"Powered by KallistiOS and bspatch",
+               (char*)"Powered by KallistiOS & bspatch",
                1,1);
 
     DrawString(40,
