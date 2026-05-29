@@ -23,7 +23,7 @@ public:
     static DownloadResult Download(const char* url, const char* localPath, const char* destPath, ProgressCallback cb = nullptr, const char* localMd5 = nullptr);
 
 private:
-    static void ParseHeaders(const char* buffer, int len, int& httpStatus, int& contentLength, char* serverMd5, int serverMd5Size, int& patchedSize);
+    static void ParseHeaders(const char* buffer, int len, int& httpStatus, int& contentLength, char* serverMd5, int serverMd5Size, int& patchedSize, char* nextFile, int nextFileSize);
     static bool ApplyPatch(const char* oldPath, const char* patchPath, const char* outPath, int newSize);
     static void Notify(ProgressCallback cb, int sleep, const char* fmt, ...);
 

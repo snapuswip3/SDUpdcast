@@ -276,6 +276,8 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
     int contentLength = -1;
     char serverMd5[33]{};
     int patchedSize = -1;
+    char nextFile[256]{};
+    bool isExtraFile = strstr(url, "extra=") != nullptr;
 
     thd_sleep(1);
 
@@ -292,7 +294,7 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
                     headerDone = true;
                     dataOffset = i + 4;
 
-                    ParseHeaders(recvBuffer, dataOffset, httpStatus, contentLength, serverMd5, sizeof(serverMd5), patchedSize);
+                    ParseHeaders(recvBuffer, dataOffset, httpStatus, contentLength, serverMd5, sizeof(serverMd5), patchedSize, nextFile, sizeof(nextFile));
 
                     if (httpStatus == 204) {
                         Logger::LogInfo("No update needed (204)");
@@ -403,15 +405,81 @@ Network::DownloadResult Network::Download(const char* url, const char* localPath
         return DownloadResult::Failure;
     }
 
-    Notify(cb, 0, "File OK.\nCopying...", totalBytes / 1024);
+    if (isExtraFile)
+    {
+        Notify(cb, 0, "File OK.\nCopying...", totalBytes / 1024);
 
-    if (!Utility::CopyFile(tmpPath, destPath, sdBuffer, SD_BUFFER_SIZE)) {
-        Logger::LogError("Failed to copy tmp file to final path");
-        return DownloadResult::Failure;
+        if (!Utility::CopyFile(tmpPath, destPath, sdBuffer, SD_BUFFER_SIZE)) {
+            Logger::LogError("Failed to copy tmp file to final path");
+            fs_unlink(tmpPath);
+            return DownloadResult::Failure;
+        }
+
+        fs_unlink(tmpPath);
     }
-    fs_unlink(tmpPath);
 
-    return DownloadResult::Success;
+    if (nextFile[0] != '\0')
+    {
+        Notify(cb, 500, "Checking extra files...");
+
+        char extraUrl[512];
+
+        if (strchr(url, '?'))
+        {
+            snprintf(extraUrl, sizeof(extraUrl),
+                "%s&extra=%s",
+                url,
+                nextFile);
+        }
+        else
+        {
+            snprintf(extraUrl, sizeof(extraUrl),
+                "%s?extra=%s",
+                url,
+                nextFile);
+        }
+
+        char extraDest[512];
+        snprintf(extraDest, sizeof(extraDest),
+            "/sd/%s",
+            nextFile);
+
+        char extraMd5[33]{};
+        const char* extraMd5Ptr = nullptr;
+
+        if (Utility::Md5File(extraDest, extraMd5))
+            extraMd5Ptr = extraMd5;
+
+        auto extraResult = Download(
+            extraUrl,
+            extraDest,
+            extraDest,
+            cb,
+            extraMd5Ptr);
+
+        if (extraResult == DownloadResult::Failure)
+        {
+            if (!isExtraFile)
+                fs_unlink(tmpPath);
+
+            return DownloadResult::Failure;
+        }
+    }
+
+    if (!isExtraFile)
+    {
+        Notify(cb, 0, "File OK.\nCopying...", totalBytes / 1024);
+
+        if (!Utility::CopyFile(tmpPath, destPath, sdBuffer, SD_BUFFER_SIZE)) {
+            Logger::LogError("Failed to copy tmp file to final path");
+            fs_unlink(tmpPath);
+            return DownloadResult::Failure;
+        }
+
+        fs_unlink(tmpPath);
+    }
+
+return DownloadResult::Success;
 }
 
 void Network::ParseHeaders(
@@ -421,12 +489,14 @@ void Network::ParseHeaders(
     int& contentLength,
     char* serverMd5,
     int serverMd5Size,
-    int& patchedSize)
+    int& patchedSize,
+    char* nextFile,
+    int nextFileSize)
 {
     const char* p = buffer;
     const char* end = buffer + len;
 
-    char token[64];
+    char token[256];
 
     while (p < end) {
         const char* lineStart = p;
@@ -447,18 +517,39 @@ void Network::ParseHeaders(
             }
             else if (strcmp(token, "X-Update-MD5:") == 0) {
                 Utility::SkipWhitespace(p, end);
+
                 if (Utility::ParseToken(p, end, token, sizeof(token))) {
                     int copyLen = (int)strlen(token);
-                    if (copyLen >= serverMd5Size) copyLen = serverMd5Size - 1;
+
+                    if (copyLen >= serverMd5Size)
+                        copyLen = serverMd5Size - 1;
+
                     memcpy(serverMd5, token, copyLen);
                     serverMd5[copyLen] = '\0';
+
                     Logger::LogInfo("Server MD5: %s", serverMd5);
                 }
             }
             else if (strcmp(token, "X-Patched-Size:") == 0) {
                 Utility::SkipWhitespace(p, end);
                 patchedSize = Utility::ParseInt(p, end);
+
                 Logger::LogInfo("Patched Size: %d", patchedSize);
+            }
+            else if (strcmp(token, "X-Next-File:") == 0) {
+                Utility::SkipWhitespace(p, end);
+
+                if (Utility::ParseToken(p, end, token, sizeof(token))) {
+                    int copyLen = (int)strlen(token);
+
+                    if (copyLen >= nextFileSize)
+                        copyLen = nextFileSize - 1;
+
+                    memcpy(nextFile, token, copyLen);
+                    nextFile[copyLen] = '\0';
+
+                    Logger::LogInfo("Next File: %s", nextFile);
+                }
             }
         }
 
