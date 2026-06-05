@@ -11,7 +11,7 @@ I am sharing now because I want to get back to working on my game, there may yet
 
 Check in the misc folder for
 
-  - an updated net\_tcp.c with some backported patches by pcercuei and Bruceleeto, this is a replacement for the offline version that came with DreamSDK r4 (\~August 2025)
+  - an updated net\_tcp.c and broadband\_adapter.c with some backported patches by pcercuei and Bruceleeto, this is a replacement for the offline version that came with DreamSDK r4 (\~August 2025)
   - a Program.cs example of how I have my server set up to send the latest version, and possibly a patch
 
 Big thanks to everyone who works on KallistiOS and on the Simulant discord.
